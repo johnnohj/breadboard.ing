@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>breadboard.ing — Online Breadboard Layout Tool</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+.app { display: flex; height: 100vh; background: #1e1e1e; color: #ccc; }
+
+.sidebar {
+  width: 320px; min-width: 320px; background: #252526; border-right: 1px solid #3c3c3c;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.sidebar-header { padding: 12px 16px; border-bottom: 1px solid #3c3c3c; }
+.sidebar-header h1 { font-size: 16px; color: #fff; margin-bottom: 8px; }
+.sidebar-header input { 
+  width: 100%; padding: 8px 12px; border: 1px solid #3c3c3c; border-radius: 6px;
+  background: #3c3c3c; color: #ddd; font-size: 13px; outline: none;
+}
+.sidebar-header input:focus { border-color: #0078d4; }
+.sidebar-header .search-hint { font-size: 10px; color: #666; margin-top: 4px; }
+
+.tabs { display: flex; border-bottom: 1px solid #3c3c3c; background: #2d2d2d; }
+.tab { 
+  flex: 1; padding: 8px; text-align: center; cursor: pointer; font-size: 12px;
+  color: #888; border-bottom: 2px solid transparent; transition: all 0.15s;
+}
+.tab:hover { color: #ccc; }
+.tab.active { color: #fff; border-bottom-color: #0078d4; }
+.tab .count { font-size: 10px; color: #666; margin-left: 4px; }
+
+.part-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+.part-list::-webkit-scrollbar { width: 6px; }
+.part-list::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+
+/* Group folder styles */
+.group-header {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  border-radius: 4px; cursor: pointer; user-select: none;
+  font-size: 12px; color: #aaa; font-weight: 600;
+  transition: background 0.1s; position: sticky; top: 0;
+  background: #252526; border-bottom: 1px solid #333; z-index: 1;
+}
+.group-header:hover { background: #2a2d2e; }
+.group-header .arrow {
+  font-size: 10px; width: 14px; text-align: center; transition: transform 0.15s;
+  color: #666; flex-shrink: 0;
+}
+.group-header .arrow.expanded { transform: rotate(90deg); }
+.group-header .group-name { flex: 1; }
+.group-header .group-count {
+  font-size: 10px; color: #555; font-weight: normal;
+}
+.group-header .group-add-all {
+  width: 20px; height: 20px; border-radius: 4px; border: 1px solid #444;
+  background: transparent; color: #666; cursor: pointer; font-size: 12px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  opacity: 0; transition: all 0.15s;
+}
+.group-header:hover .group-add-all { opacity: 0.6; }
+.group-header .group-add-all:hover { opacity: 1; background: #0078d4; border-color: #0078d4; color: #fff; }
+
+.group-body { padding-left: 0; }
+
+.part-item {
+  display: flex; align-items: center; gap: 10px; padding: 5px 8px;
+  border-radius: 6px; cursor: grab; transition: background 0.1s;
+  border: 1px solid transparent; margin-bottom: 1px;
+}
+.part-item:hover { background: #2a2d2e; border-color: #3c3c3c; }
+.part-item:active { cursor: grabbing; }
+.part-item .thumb {
+  width: 36px; height: 36px; flex-shrink: 0; border-radius: 4px;
+  background: #1a1a1a; display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.part-item .thumb svg, .part-item .thumb img { max-width: 32px; max-height: 32px; }
+.part-item .thumb .placeholder { font-size: 16px; color: #555; }
+.part-item .info { flex: 1; min-width: 0; }
+.part-item .info .name { font-size: 12px; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.part-item .info .meta { font-size: 10px; color: #666; }
+.part-item .add-btn {
+  width: 24px; height: 24px; border-radius: 50%; border: 1px solid #555;
+  background: transparent; color: #888; cursor: pointer; font-size: 14px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.part-item .add-btn:hover { background: #0078d4; border-color: #0078d4; color: #fff; }
+
+.canvas-container { flex: 1; position: relative; overflow: hidden; }
+.canvas-toolbar {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 4px; background: #2d2d2d; padding: 4px; border-radius: 8px;
+  border: 1px solid #3c3c3c; z-index: 10;
+}
+.canvas-toolbar button {
+  padding: 6px 12px; border: none; border-radius: 4px; background: transparent;
+  color: #888; cursor: pointer; font-size: 12px; transition: all 0.15s;
+}
+.canvas-toolbar button:hover { background: #3c3c3c; color: #ddd; }
+.canvas-toolbar button.active { background: #0078d4; color: #fff; }
+.canvas-toolbar button.danger:hover { background: #d32f2f; color: #fff; }
+
+.canvas-wrapper {
+  width: 100%; height: 100%; position: relative;
+  background: #161616;
+}
+
+.canvas-grid {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 0;
+}
+
+.canvas-part {
+  position: absolute; cursor: move; z-index: 1; user-select: none;
+  touch-action: none;
+}
+.canvas-part:hover { z-index: 100; }
+.canvas-part.selected { outline: 2px solid #0078d4; outline-offset: 2px; border-radius: 2px; }
+.canvas-part svg { display: block; pointer-events: none; }
+.canvas-part .part-label {
+  position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; color: #888; white-space: nowrap; pointer-events: none;
+  text-shadow: 0 1px 2px #000;
+}
+
+.wires-overlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 50;
+}
+.wires-overlay svg { width: 100%; height: 100%; }
+
+.connector-pin {
+  position: absolute; cursor: crosshair; z-index: 2; border-radius: 50%;
+  transition: background 0.15s, transform 0.15s;
+  background: rgba(0, 120, 212, 0.08);
+  border: 0.5px solid rgba(0, 120, 212, 0.2);
+}
+.connector-pin:hover { background: rgba(0, 120, 212, 0.4) !important; transform: scale(1.3); }
+.connector-pin.wire-source { background: rgba(255, 170, 0, 0.5) !important; }
+.connector-pin.snap-target {
+  background: rgba(255, 170, 0, 0.25) !important;
+  border-color: rgba(255, 170, 0, 0.6) !important;
+  animation: pulse 0.8s ease-in-out infinite;
+}
+.connector-pin.snapped {
+  background: rgba(76, 175, 80, 0.5) !important;
+  border-color: rgba(76, 175, 80, 0.8) !important;
+}
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.5); opacity: 1; }
+}
+
+.wire-drawing-line {
+  position: absolute; pointer-events: none; z-index: 60;
+}
+
+.status-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 4px 12px; background: #007acc; color: #fff;
+  font-size: 11px; z-index: 10; display: flex; justify-content: space-between;
+}
+
+.empty-state {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  text-align: center; color: #555; pointer-events: none;
+}
+.empty-state h2 { font-size: 24px; margin-bottom: 8px; }
+.empty-state p { font-size: 14px; }
+
+.loading {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: #1e1e1e; display: flex; align-items: center; justify-content: center;
+  z-index: 9999; flex-direction: column; gap: 16px;
+}
+.loading .spinner {
+  width: 40px; height: 40px; border: 3px solid #333;
+  border-top-color: #0078d4; border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading p { color: #888; font-size: 14px; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #777; }
+</style>
+</head>
+<body>
+<div id="loading" class="loading">
+  <div class="spinner"></div>
+  <p>Loading parts library...</p>
+</div>
+
+<div class="app" id="app" style="display:none">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h1>🧩 breadboard.ing</h1>
+      <input type="text" id="search" placeholder="Search parts..." oninput="filterParts()">
+      <div class="search-hint">🔍 Search expands all matching groups</div>
+    </div>
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-tab="fritzing-core" onclick="switchTab('fritzing-core')">
+        Fritzing <span class="count" id="count-fritzing-core"></span>
+      </div>
+      <div class="tab" data-tab="fritzing-contrib" onclick="switchTab('fritzing-contrib')">
+        Contrib <span class="count" id="count-fritzing-contrib"></span>
+      </div>
+      <div class="tab" data-tab="adafruit" onclick="switchTab('adafruit')">
+        Adafruit <span class="count" id="count-adafruit"></span>
+      </div>
+    </div>
+    <div class="part-list" id="partList"></div>
+  </div>
+
+  <div class="canvas-container">
+    <div class="canvas-toolbar">
+      <button onclick="setTool('select')" class="active" id="tool-select">✏️ Select</button>
+      <button onclick="setTool('wire')" id="tool-wire">🔌 Wire</button>
+      <span style="color:#444;width:1px;background:#3c3c3c;margin:2px 4px;"></span>
+      <button onclick="clearAll()" class="danger">🗑️ Clear</button>
+      <button onclick="copyShareLink()">🔗 Share</button>
+    </div>
+
+    <div class="canvas-wrapper" id="canvasWrapper">
+      <canvas class="canvas-grid" id="gridCanvas"></canvas>
+      <div class="empty-state" id="emptyState">
+        <h2>📐 Drop Parts Here</h2>
+        <p>Click + on a part in the sidebar, or drag it here</p>
+      </div>
+      <div class="wires-overlay" id="wiresOverlay">
+        <svg id="wiresSvg"></svg>
+      </div>
+      <div id="partsContainer"></div>
+      <svg class="wire-drawing-line" id="wireDrawingLine" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:60">
+        <line id="tempWireLine" stroke="#ffaa00" stroke-width="2" stroke-dasharray="5,3"/>
+      </svg>
+    </div>
+    <div class="status-bar" id="statusBar">
+      <span id="statusText">Ready. Click + on a part to add it.</span>
+      <span id="statusCount">0 parts, 0 wires</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== SVG LOADER =====
+const svgCache = {};
+
+async function loadSvgForPart(partMeta) {
+  const cacheKey = partMeta.id;
+  if (svgCache[cacheKey]) return svgCache[cacheKey];
+  
+  if (partMeta.type === 'fzp') {
+    const ref = partMeta.svg_refs && partMeta.svg_refs.breadboard;
+    if (!ref) throw new Error('No breadboard SVG ref');
+    const svgPath = `fritzing-parts/svg/${partMeta.category}/${ref}`;
+    const resp = await fetch(svgPath);
+    if (!resp.ok) throw new Error(`Failed to load ${svgPath}`);
+    const svg = await resp.text();
+    svgCache[cacheKey] = svg;
+    return svg;
+  } else if (partMeta.type === 'fzpz') {
+    const resp = await fetch(partMeta.fzpz_file);
+    if (!resp.ok) throw new Error(`Failed to load ${partMeta.fzpz_file}`);
+    const blob = await resp.arrayBuffer();
+    const zip = await JSZip.loadAsync(blob);
+    
+    const ref = partMeta.svg_refs && partMeta.svg_refs.breadboard;
+    let svgContent = null;
+    if (ref) {
+      const refFilename = ref.split('/').pop();
+      for (const [name, file] of Object.entries(zip.files)) {
+        if (name.endsWith('.svg') && name.endsWith(refFilename)) {
+          svgContent = await file.async('string');
+          break;
+        }
+      }
+    }
+    if (!svgContent) {
+      for (const [name, file] of Object.entries(zip.files)) {
+        if (name.endsWith('.svg') && name.includes('breadboard')) {
+          svgContent = await file.async('string');
+          break;
+        }
+      }
+    }
+    if (!svgContent) {
+      for (const [name, file] of Object.entries(zip.files)) {
+        if (name.endsWith('.svg')) {
+          svgContent = await file.async('string');
+          break;
+        }
+      }
+    }
+    if (svgContent) {
+      svgCache[cacheKey] = svgContent;
+      return svgContent;
+    }
+    throw new Error('No SVG found in fzpz');
+  }
+}
+
+const iconCache = {};
+
+async function loadIconForPart(partMeta) {
+  const cacheKey = 'icon_' + partMeta.id;
+  if (iconCache[cacheKey]) return iconCache[cacheKey];
+  
+  if (partMeta.type === 'fzp') {
+    const ref = partMeta.svg_refs && partMeta.svg_refs.icon;
+    if (!ref) return null;
+    const svgPath = `fritzing-parts/svg/${partMeta.category}/${ref}`;
+    try {
+      const resp = await fetch(svgPath);
+      if (!resp.ok) return null;
+      const svg = await resp.text();
+      iconCache[cacheKey] = svg;
+      return svg;
+    } catch { return null; }
+  } else {
+    try {
+      const svg = await loadSvgForPart(partMeta);
+      iconCache[cacheKey] = svg;
+      return svg;
+    } catch { return null; }
+  }
+}
+
+// ===== PARTS DATABASE =====
+let partsDB = [];
+let expandedGroups = {};
+let groupOrder = [];
+
+async function loadPartsDB() {
+  try {
+    const resp = await fetch('parts_index.json');
+    partsDB = await resp.json();
+    
+    document.getElementById('count-fritzing-core').textContent = 
+      partsDB.filter(p => p.source === 'fritzing' && p.category === 'core').length;
+    document.getElementById('count-fritzing-contrib').textContent = 
+      partsDB.filter(p => p.source === 'fritzing' && p.category === 'contrib').length;
+    document.getElementById('count-adafruit').textContent = 
+      partsDB.filter(p => p.source === 'adafruit').length;
+    
+    // Compute group order (by count descending, then alphabetically)
+    computeGroupOrder();
+    
+    renderPartList();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    loadStateFromUrl();
+  } catch (e) {
+    document.querySelector('#loading p').textContent = 'Failed to load parts: ' + e.message;
+    document.querySelector('#loading .spinner').style.display = 'none';
+  }
+}
+
+function computeGroupOrder() {
+  const counts = {};
+  for (const p of partsDB) {
+    const g = p.group || 'Other';
+    counts[g] = (counts[g] || 0) + 1;
+  }
+  groupOrder = Object.keys(counts).sort((a, b) => {
+    const diff = counts[b] - counts[a];
+    if (diff !== 0) return diff;
+    return a.localeCompare(b);
+  });
+}
+
+// ===== SIDEBAR =====
+let currentTab = 'fritzing-core';
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  renderPartList();
+}
+
+function filterParts() {
+  renderPartList();
+}
+
+function getFilteredParts() {
+  const q = document.getElementById('search').value.toLowerCase().trim();
+  const isAda = currentTab === 'adafruit';
+  let filtered = partsDB.filter(p => 
+    isAda ? p.source === 'adafruit' : p.source === 'fritzing' && p.category === currentTab.replace('fritzing-', '')
+  );
+  if (q) {
+    filtered = filtered.filter(p => 
+      p.title.toLowerCase().includes(q) ||
+      (p.group || '').toLowerCase().includes(q) ||
+      (p.tags || []).some(t => t.toLowerCase().includes(q)) ||
+      Object.values(p.properties || {}).some(v => typeof v === 'string' && v.toLowerCase().includes(q))
+    );
+  }
+  return filtered;
+}
+
+function groupParts(parts) {
+  const groups = {};
+  const order = [];
+  const seen = new Set();
+  
+  for (const p of parts) {
+    const g = p.group || 'Other';
+    if (!groups[g]) {
+      groups[g] = [];
+      order.push(g);
+    }
+    groups[g].push(p);
+  }
+  
+  // Sort groups by size desc, then alpha
+  order.sort((a, b) => {
+    const diff = groups[b].length - groups[a].length;
+    if (diff !== 0) return diff;
+    return a.localeCompare(b);
+  });
+  
+  return { groups, order };
+}
+
+function renderPartList() {
+  const container = document.getElementById('partList');
+  const parts = getFilteredParts();
+  container.innerHTML = '';
+  
+  const q = document.getElementById('search').value.toLowerCase().trim();
+  const isSearching = q.length > 0;
+  
+  if (isSearching) {
+    // Flat list when searching
+    parts.forEach((p) => {
+      const div = createPartItem(p);
+      container.appendChild(div);
+      loadThumbnail(p, div);
+    });
+    return;
+  }
+  
+  // Grouped view
+  const { groups, order } = groupParts(parts);
+  
+  for (const groupName of order) {
+    const groupParts = groups[groupName];
+    
+    // Group header
+    const header = document.createElement('div');
+    header.className = 'group-header';
+    header.dataset.group = groupName;
+    
+    const isExpanded = expandedGroups[groupName] || false;
+    
+    header.innerHTML = `
+      <span class="arrow ${isExpanded ? 'expanded' : ''}">▶</span>
+      <span class="group-name">${escHtml(groupName)}</span>
+      <span class="group-count">${groupParts.length}</span>
+      <button class="group-add-all" title="Add all parts in this group to canvas">+</button>
+    `;
+    
+    header.onclick = (e) => {
+      if (e.target.closest('.group-add-all')) return;
+      toggleGroup(groupName);
+    };
+    
+    const addAllBtn = header.querySelector('.group-add-all');
+    addAllBtn.onclick = (e) => {
+      e.stopPropagation();
+      // Add each part in the group
+      for (const p of groupParts) {
+        const idx = partsDB.indexOf(p);
+        if (idx >= 0) addPartToCanvas(idx);
+      }
+    };
+    
+    container.appendChild(header);
+    
+    // Group body
+    const body = document.createElement('div');
+    body.className = 'group-body';
+    body.style.display = isExpanded || isSearching ? 'block' : 'none';
+    
+    for (const p of groupParts) {
+      const item = createPartItem(p);
+      body.appendChild(item);
+      
+      // Only load thumbnail if group is expanded
+      if (isExpanded || isSearching) {
+        loadThumbnail(p, item);
+      }
+    }
+    
+    container.appendChild(body);
+  }
+}
+
+function toggleGroup(groupName) {
+  const headers = document.querySelectorAll('.group-header');
+  for (const header of headers) {
+    if (header.dataset.group === groupName) {
+      const body = header.nextElementSibling;
+      if (body && body.classList.contains('group-body')) {
+        const isCurrentlyExpanded = body.style.display !== 'none';
+        body.style.display = isCurrentlyExpanded ? 'none' : 'block';
+        header.querySelector('.arrow').classList.toggle('expanded');
+        expandedGroups[groupName] = !isCurrentlyExpanded;
+        
+        // Load thumbnails when expanding
+        if (!isCurrentlyExpanded) {
+          body.querySelectorAll('.part-item').forEach(item => {
+            const idx = parseInt(item.dataset.partIdx);
+            if (!isNaN(idx)) loadThumbnail(partsDB[idx], item);
+          });
+        }
+      }
+    }
+  }
+}
+
+function createPartItem(p) {
+  const div = document.createElement('div');
+  div.className = 'part-item';
+  div.draggable = true;
+  div.dataset.partIdx = partsDB.indexOf(p);
+  
+  const srcLabel = p.source === 'fritzing' ? 'Fritzing' : 'Adafruit';
+  const pinCount = (p.connectors || []).length;
+  
+  div.innerHTML = `
+    <div class="thumb" id="thumb-${p.id}"><span class="placeholder">🧩</span></div>
+    <div class="info">
+      <div class="name">${escHtml(p.title)}</div>
+      <div class="meta">${srcLabel} · ${pinCount} pins</div>
+    </div>
+    <button class="add-btn" onclick="event.stopPropagation(); addPartToCanvas(${partsDB.indexOf(p)})">+</button>
+  `;
+  
+  div.ondragstart = (e) => {
+    e.dataTransfer.setData('text/plain', partsDB.indexOf(p));
+    div.style.opacity = '0.5';
+  };
+  div.ondragend = () => { div.style.opacity = '1'; };
+  
+  return div;
+}
+
+function loadThumbnail(p, item) {
+  loadIconForPart(p).then(svg => {
+    if (svg) {
+      const thumb = item.querySelector('.thumb');
+      if (thumb) {
+        thumb.innerHTML = `<img src="data:image/svg+xml,${encodeURIComponent(svg)}" alt="" style="max-width:32px;max-height:32px;">`;
+      }
+    }
+  }).catch(() => {});
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ===== CANVAS STATE =====
+let canvasState = {
+  parts: [],
+  wires: [],
+  viewport: { x: 0, y: 0, scale: 1 }
+};
+let currentTool = 'select';
+let nextPartId = 1;
+let wireDrawing = null;
+
+const SVG_SCALE = 1.5;
+
+// Grid spacing in display pixels for 0.1" — computed from SVG dpi
+// Default: 72 dpi (common for Adafruit & Fritzing SVGs), 0.1" = 7.2 SVG units × 1.5 = 10.8px
+let GRID_PX = 10.8;
+const CONNECTOR_SNAP_THRESHOLD = 7.5; // pixels = 5 SVG units (0.05 inches)
+
+function snap(v) {
+  return Math.round(v / GRID_PX) * GRID_PX;
+}
+
+/** Extract the display-pixels-per-0.1\" grid spacing from SVG metadata.
+ * Parses width="Xin" and viewBox to compute the SVG's dots-per-inch,
+ * then derives the 0.1\" grid spacing in display pixels. */
+function computeGridPx(svgContent) {
+  const wMatch = svgContent.match(/width="([\d.]+)in"/);
+  const vbMatch = svgContent.match(/viewBox="[\d.]+ [\d.]+ ([\d.]+) ([\d.]+)"/);
+  if (wMatch && vbMatch) {
+    const physInches = parseFloat(wMatch[1]);
+    const vbW = parseFloat(vbMatch[1]);
+    const dpi = vbW / physInches;  // SVG units per inch
+    const pxPerInch = dpi * SVG_SCALE;
+    GRID_PX = pxPerInch / 10;  // pixels for 0.1\"
+  }
+}
+
+/** Return absolute positions of all connectors for a part state in pixel coordinates.
+ * Connector positions from the database are in SVG viewBox units; multiply by SVG_SCALE
+ * to convert to pixels since partState.x/y are pixel positions on the canvas.
+ * Filtered to only include connectors listed in the part's connectors array. */
+function getConnectorWorldPositions(partState) {
+  const part = partsDB[partState.partIdx];
+  if (!part || !part.connector_positions) return [];
+  
+  // Only use connectors that are officially part of this part
+  const knownIds = new Set((part.connectors || []).map(c => c.id));
+  
+  const results = [];
+  for (const [cid, pos] of Object.entries(part.connector_positions)) {
+    if (!knownIds.has(cid)) continue;
+    results.push({
+      connectorId: cid,
+      absX: partState.x + pos.x * SVG_SCALE,
+      absY: partState.y + pos.y * SVG_SCALE
+    });
+  }
+  return results;
+}
+
+/** Find mated connector pairs between two parts and auto-connect wires.
+ * Connector positions in pixel coordinates. */
+function autoConnectMatedConnectors(draggedPartId, otherPartId, draggedState, otherState) {
+  const draggedPart = partsDB[draggedState.partIdx];
+  const otherPart = partsDB[otherState.partIdx];
+  if (!draggedPart || !otherPart) return 0;
+  
+  const draggedConns = draggedPart.connector_positions || {};
+  const otherConns = otherPart.connector_positions || {};
+  
+  let count = 0;
+  for (const [dcid, dpos] of Object.entries(draggedConns)) {
+    const dAbsX = draggedState.x + dpos.x * SVG_SCALE;
+    const dAbsY = draggedState.y + dpos.y * SVG_SCALE;
+    
+    for (const [ocid, opos] of Object.entries(otherConns)) {
+      const oAbsX = otherState.x + opos.x * SVG_SCALE;
+      const oAbsY = otherState.y + opos.y * SVG_SCALE;
+      
+      const dx = dAbsX - oAbsX;
+      const dy = dAbsY - oAbsY;
+      if (Math.abs(dx) < 1.5 && Math.abs(dy) < 1.5) {
+        // Connectors are aligned - create wire if one doesn't already exist
+        const exists = canvasState.wires.some(w => 
+          (w.f === draggedPartId && w.fc === dcid && w.t === otherPartId && w.tc === ocid) ||
+          (w.f === otherPartId && w.fc === ocid && w.t === draggedPartId && w.tc === dcid)
+        );
+        if (!exists) {
+          canvasState.wires.push({
+            f: draggedPartId, fc: dcid,
+            t: otherPartId, tc: ocid
+          });
+          count++;
+          // Highlight connected pins with snapped class
+          const dpin = document.querySelector(`#cp-${draggedPartId} .connector-pin[data-connector-id="${dcid}"]`);
+          const opin = document.querySelector(`#cp-${otherPartId} .connector-pin[data-connector-id="${ocid}"]`);
+          if (dpin) dpin.classList.add('snapped');
+          if (opin) opin.classList.add('snapped');
+        }
+      }
+    }
+  }
+  return count;
+}
+
+const container = document.getElementById('partsContainer');
+const wrapper = document.getElementById('canvasWrapper');
+const wiresSvg = document.getElementById('wiresSvg');
+
+function updateStatus() {
+  document.getElementById('statusText').textContent = currentTool === 'wire' 
+    ? '🔌 Click a connector pin to start a wire.'
+    : '✏️ Select and drag parts. Drag empty canvas to pan.';
+  document.getElementById('statusCount').textContent = 
+    `${canvasState.parts.length} parts, ${canvasState.wires.length} wires`;
+}
+
+function addPartToCanvas(partIdx) {
+  const part = partsDB[partIdx];
+  if (!part) return;
+  
+  const id = 'p' + (nextPartId++);
+  const vp = canvasState.viewport;
+  const cx = wrapper.clientWidth / 2 - vp.x;
+  const cy = wrapper.clientHeight / 2 - vp.y;
+  const x = snap((cx - 100) / vp.scale);
+  const y = snap((cy - 50) / vp.scale);
+  
+  canvasState.parts.push({
+    partIdx, id, x, y, rotation: 0
+  });
+  
+  renderPart(id);
+  updateStatus();
+  saveStateToUrl();
+  hideEmptyState();
+}
+
+function hideEmptyState() {
+  document.getElementById('emptyState').style.display = 'none';
+}
+
+wrapper.ondragover = (e) => e.preventDefault();
+wrapper.ondrop = (e) => {
+  e.preventDefault();
+  const partIdx = parseInt(e.dataTransfer.getData('text/plain'));
+  if (isNaN(partIdx)) return;
+  const part = partsDB[partIdx];
+  if (!part) return;
+  
+  const rect = wrapper.getBoundingClientRect();
+  const vp = canvasState.viewport;
+  const rawX = (e.clientX - rect.left - vp.x) / vp.scale - 50;
+  const rawY = (e.clientY - rect.top - vp.y) / vp.scale - 25;
+  
+  const id = 'p' + (nextPartId++);
+  const newState = { partIdx, id, x: snap(rawX), y: snap(rawY), rotation: 0 };
+  canvasState.parts.push(newState);
+  renderPart(id);
+  
+  // Check for connector snap after placement
+  const conns = getConnectorWorldPositions(newState);
+  if (conns.length > 0) {
+    for (const otherState of canvasState.parts) {
+      if (otherState.id === newState.id) continue;
+      const otherConns = getConnectorWorldPositions(otherState);
+      if (otherConns.length === 0) continue;
+      
+      let bestDist = Infinity;
+      let bestOffset = null;
+      for (const dc of conns) {
+        for (const oc of otherConns) {
+          const dx = oc.absX - dc.absX;
+          const dy = oc.absY - dc.absY;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestOffset = {dx, dy};
+          }
+        }
+      }
+      
+      if (bestDist < CONNECTOR_SNAP_THRESHOLD && bestOffset) {
+        newState.x = newState.x + bestOffset.dx;
+        newState.y = newState.y + bestOffset.dy;
+        const div = document.getElementById('cp-' + id);
+        if (div) {
+          div.style.left = newState.x + 'px';
+          div.style.top = newState.y + 'px';
+        }
+        // Auto-connect after snap
+        const wireCount = autoConnectMatedConnectors(newState.id, otherState.id, newState, otherState);
+        if (wireCount > 0) {
+          renderWires();
+          updateStatus();
+        }
+      }
+    }
+  }
+  
+  updateStatus();
+  saveStateToUrl();
+  hideEmptyState();
+};
+
+async function renderPart(partId) {
+  const state = canvasState.parts.find(p => p.id === partId);
+  if (!state) return;
+  const part = partsDB[state.partIdx];
+  if (!part) return;
+  
+  const existing = document.getElementById('cp-' + partId);
+  if (existing) existing.remove();
+  
+  let svgContent;
+  try {
+    svgContent = await loadSvgForPart(part);
+  } catch (e) {
+    console.error('Failed to load SVG for', part.title, e);
+    return;
+  }
+  
+  const parser = new DOMParser();
+  const svgDoc = parser.parseFromString(svgContent, 'image/svg+xml');
+  const svgEl = svgDoc.querySelector('svg');
+  let vb = svgEl.getAttribute('viewBox') || '0 0 100 100';
+  const vbParts = vb.split(/\s+/).map(Number);
+  const svgW = vbParts[2] || 100;
+  const svgH = vbParts[3] || 100;
+  
+  const scale = 1.5;
+  const dispW = svgW * scale;
+  const dispH = svgH * scale;
+  
+  const div = document.createElement('div');
+  div.id = 'cp-' + partId;
+  div.className = 'canvas-part';
+  div.style.left = state.x + 'px';
+  div.style.top = state.y + 'px';
+  div.style.width = dispW + 'px';
+  div.style.height = dispH + 'px';
+  if (state.rotation) {
+    div.style.transform = `rotate(${state.rotation}deg)`;
+  }
+  div.dataset.partId = partId;
+  
+  div.innerHTML = `<div style="width:${dispW}px;height:${dispH}px;overflow:hidden">${svgContent}</div>`;
+  
+  const innerSvg = div.querySelector('svg');
+  if (innerSvg) {
+    innerSvg.setAttribute('width', dispW + 'px');
+    innerSvg.setAttribute('height', dispH + 'px');
+    innerSvg.style.width = dispW + 'px';
+    innerSvg.style.height = dispH + 'px';
+    innerSvg.setAttribute('viewBox', vb);
+    innerSvg.removeAttribute('transform');
+  }
+  
+  const connectors = part.connectors || [];
+  connectors.forEach(conn => {
+    const pinId = conn.id + 'pin';
+    const pinEl = svgDoc.getElementById(pinId);
+    if (!pinEl) return;
+    
+    let cx, cy, pw = 6, ph = 6;
+    const tag = pinEl.tagName.toLowerCase();
+    if (tag === 'rect') {
+      cx = parseFloat(pinEl.getAttribute('x') || 0) + parseFloat(pinEl.getAttribute('width') || 6) / 2;
+      cy = parseFloat(pinEl.getAttribute('y') || 0) + parseFloat(pinEl.getAttribute('height') || 6) / 2;
+      pw = parseFloat(pinEl.getAttribute('width') || 6);
+      ph = parseFloat(pinEl.getAttribute('height') || 6);
+    } else if (tag === 'circle') {
+      cx = parseFloat(pinEl.getAttribute('cx') || 0);
+      cy = parseFloat(pinEl.getAttribute('cy') || 0);
+      pw = ph = parseFloat(pinEl.getAttribute('r') || 3) * 2;
+    } else return;
+    
+    const sx = (cx / svgW) * dispW;
+    const sy = (cy / svgH) * dispH;
+    const sz = Math.max(10, Math.min(20, (pw / svgW) * dispW * 2));
+    
+    const pinDiv = document.createElement('div');
+    pinDiv.className = 'connector-pin';
+    pinDiv.style.left = (sx - sz/2) + 'px';
+    pinDiv.style.top = (sy - sz/2) + 'px';
+    pinDiv.style.width = sz + 'px';
+    pinDiv.style.height = sz + 'px';
+    pinDiv.dataset.partId = partId;
+    pinDiv.dataset.connectorId = conn.id;
+    pinDiv.title = conn.name || conn.id;
+    
+    pinDiv.onmousedown = (e) => {
+      e.stopPropagation();
+      if (currentTool === 'wire') startWireDrawing(partId, conn.id, e);
+    };
+    
+    div.querySelector('div:first-child').appendChild(pinDiv);
+  });
+  
+  container.appendChild(div);
+  makePartDraggable(div);
+  
+  renderWires();
+}
+
+function makePartDraggable(div) {
+  let dragging = false, startX, startY, origX, origY;
+  let snapped = false; // track if we snapped during this drag
+  
+  div.onmousedown = (e) => {
+    if (e.target.classList.contains('connector-pin')) return;
+    if (currentTool !== 'select') return;
+    
+    dragging = true;
+    snapped = false;
+    selectPart(div.dataset.partId);
+    const st = canvasState.parts.find(p => p.id === div.dataset.partId);
+    if (!st) return;
+    startX = e.clientX; startY = e.clientY;
+    origX = st.x; origY = st.y;
+    
+    const onMove = (ev) => {
+      if (!dragging) return;
+      
+      // Clear previous snap-target highlights
+      document.querySelectorAll('.connector-pin.snap-target').forEach(el => el.classList.remove('snap-target'));
+      
+      const vp = canvasState.viewport;
+      const rawX = origX + (ev.clientX - startX) / vp.scale;
+      const rawY = origY + (ev.clientY - startY) / vp.scale;
+      
+      // Default: grid snap
+      st.x = snap(rawX);
+      st.y = snap(rawY);
+      
+      // Connector-aware snapping: check if any connectors align with other parts
+      const draggedConns = getConnectorWorldPositions(st);
+      let foundSnap = false;
+      if (draggedConns.length > 0) {
+        for (const otherState of canvasState.parts) {
+          if (otherState.id === st.id) continue;
+          const otherConns = getConnectorWorldPositions(otherState);
+          if (otherConns.length === 0) continue;
+          
+          // Find the closest connector pair
+          let bestDist = Infinity;
+          let bestOffset = null;
+          let bestDc = null;
+          let bestOc = null;
+          for (const dc of draggedConns) {
+            for (const oc of otherConns) {
+              const dx = oc.absX - dc.absX;
+              const dy = oc.absY - dc.absY;
+              const dist = Math.sqrt(dx*dx + dy*dy);
+              if (dist < bestDist) {
+                bestDist = dist;
+                bestOffset = {dx, dy};
+                bestDc = dc;
+                bestOc = oc;
+              }
+            }
+          }
+          
+          // Show snap target highlight on connectors close to matching
+          if (bestDist < CONNECTOR_SNAP_THRESHOLD && bestDc && bestOc) {
+            foundSnap = true;
+            // Highlight matching connectors on the dragged part
+            document.querySelectorAll(`#cp-${st.id} .connector-pin[data-connector-id="${bestDc.connectorId}"]`).forEach(
+              el => el.classList.add('snap-target')
+            );
+            // Highlight matching connectors on the other part
+            document.querySelectorAll(`#cp-${otherState.id} .connector-pin[data-connector-id="${bestOc.connectorId}"]`).forEach(
+              el => el.classList.add('snap-target')
+            );
+          }
+          
+          // If close enough, snap the dragged part to align connectors precisely
+          if (bestDist < CONNECTOR_SNAP_THRESHOLD && bestOffset) {
+            // Before applying offset, check if grid position would also align
+            const gridSnapX = snap(rawX + bestOffset.dx);
+            const gridSnapY = snap(rawY + bestOffset.dy);
+            
+            // Check if the grid-snapped position still maintains connector alignment
+            let gridStillAligns = false;
+            if (bestDist < 1.5) {  // ~1 SVG unit in pixels
+              gridStillAligns = true;
+            }
+            
+            if (gridStillAligns) {
+              st.x = gridSnapX;
+              st.y = gridSnapY;
+            } else {
+              // Use precise position to align connectors
+              st.x = st.x + bestOffset.dx;
+              st.y = st.y + bestOffset.dy;
+            }
+            snapped = true;
+          }
+        }
+      }
+      
+      // Show/hide status hint about snap availability
+      if (foundSnap && !snapped) {
+        document.getElementById('statusText').textContent = '🎯 Connector snap available!';
+      } else if (foundSnap && snapped) {
+        // Clear snap-target highlights after snapping
+        document.querySelectorAll('.connector-pin.snap-target').forEach(el => el.classList.remove('snap-target'));
+      }
+      
+      div.style.left = st.x + 'px';
+      div.style.top = st.y + 'px';
+      renderWires();
+    };
+    const onUp = () => {
+      dragging = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      
+      // Clean up any leftover snap-target highlights
+      document.querySelectorAll('.connector-pin.snap-target').forEach(el => el.classList.remove('snap-target'));
+      
+      // Auto-connect mated connectors after snap
+      if (snapped) {
+        let wireCount = 0;
+        const draggedConns = getConnectorWorldPositions(st);
+        for (const otherState of canvasState.parts) {
+          if (otherState.id === st.id) continue;
+          wireCount += autoConnectMatedConnectors(st.id, otherState.id, st, otherState);
+        }
+        if (wireCount > 0) {
+          renderWires();
+          updateStatus();
+          document.getElementById('statusText').textContent = 
+            `🔗 Connected ${wireCount} wire${wireCount > 1 ? 's' : ''}!`;
+          // Flash snapped connectors green briefly
+          setTimeout(() => {
+            document.querySelectorAll('.connector-pin.snapped').forEach(el => el.classList.remove('snapped'));
+          }, 1500);
+          setTimeout(() => { document.getElementById('statusText').textContent = ''; updateStatus(); }, 2000);
+        }
+      }
+      
+      saveStateToUrl();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  };
+}
+
+function selectPart(partId) {
+  document.querySelectorAll('.canvas-part').forEach(el => el.classList.remove('selected'));
+  if (partId) {
+    const el = document.getElementById('cp-' + partId);
+    if (el) el.classList.add('selected');
+  }
+  renderWires();
+}
+
+// ===== WIRE DRAWING =====
+function startWireDrawing(partId, connectorId, e) {
+  const div = document.getElementById('cp-' + partId);
+  if (!div) return;
+  const rect = wrapper.getBoundingClientRect();
+  const pinEl = div.querySelector(`[data-connector-id="${connectorId}"]`);
+  if (!pinEl) return;
+  
+  const pinRect = pinEl.getBoundingClientRect();
+  const sx = pinRect.left + pinRect.width/2 - rect.left;
+  const sy = pinRect.top + pinRect.height/2 - rect.top;
+  
+  wireDrawing = { fromPartId: partId, fromConnector: connectorId, startX: sx, startY: sy };
+  
+  const line = document.getElementById('wireDrawingLine');
+  line.style.display = 'block';
+  const tl = document.getElementById('tempWireLine');
+  tl.setAttribute('x1', sx); tl.setAttribute('y1', sy);
+  tl.setAttribute('x2', sx); tl.setAttribute('y2', sy);
+  
+  document.getElementById('statusText').innerHTML = 
+    '🔌 Click another connector to connect. <span style="cursor:pointer;color:#ff0" onclick="cancelWireDrawing()">[Cancel]</span>';
+  
+  document.querySelectorAll(`.connector-pin[data-part-id="${partId}"]`).forEach(el => el.classList.add('wire-source'));
+  
+  const onMove = (ev) => {
+    if (!wireDrawing) return;
+    tl.setAttribute('x2', ev.clientX - rect.left);
+    tl.setAttribute('y2', ev.clientY - rect.top);
+  };
+  const onUp = (ev) => {
+    const target = document.elementFromPoint(ev.clientX, ev.clientY);
+    if (target && target.classList.contains('connector-pin') && target.dataset.partId !== partId) {
+      completeWire(target.dataset.partId, target.dataset.connectorId);
+    }
+    cancelWireDrawing();
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function cancelWireDrawing() {
+  wireDrawing = null;
+  document.getElementById('wireDrawingLine').style.display = 'none';
+  document.querySelectorAll('.connector-pin').forEach(el => el.classList.remove('wire-source'));
+}
+
+function completeWire(toPartId, toConnector) {
+  if (!wireDrawing) return;
+  const exists = canvasState.wires.some(w => 
+    (w.f === wireDrawing.fromPartId && w.fc === wireDrawing.fromConnector && w.t === toPartId && w.tc === toConnector) ||
+    (w.f === toPartId && w.fc === toConnector && w.t === wireDrawing.fromPartId && w.tc === wireDrawing.fromConnector)
+  );
+  if (!exists) {
+    canvasState.wires.push({
+      f: wireDrawing.fromPartId, fc: wireDrawing.fromConnector,
+      t: toPartId, tc: toConnector
+    });
+    renderWires();
+    updateStatus();
+    saveStateToUrl();
+  }
+  wireDrawing = null;
+}
+
+function renderWires() {
+  const svg = wiresSvg;
+  svg.innerHTML = '';
+  
+  const rect = wrapper.getBoundingClientRect();
+  
+  canvasState.wires.forEach(w => {
+    const fromPin = getConnectorPin(w.f, w.fc);
+    const toPin = getConnectorPin(w.t, w.tc);
+    if (!fromPin || !toPin) return;
+    
+    const fRect = fromPin.getBoundingClientRect();
+    const tRect = toPin.getBoundingClientRect();
+    const x1 = fRect.left + fRect.width/2 - rect.left;
+    const y1 = fRect.top + fRect.height/2 - rect.top;
+    const x2 = tRect.left + tRect.width/2 - rect.left;
+    const y2 = tRect.top + tRect.height/2 - rect.top;
+    
+    const selected = document.querySelector('.canvas-part.selected');
+    const hl = selected && (w.f === selected.dataset.partId || w.t === selected.dataset.partId);
+    
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+    line.setAttribute('stroke', hl ? '#4fc3f7' : '#ffaa00');
+    line.setAttribute('stroke-width', hl ? '3' : '2');
+    line.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(line);
+    
+    for (const [cx, cy] of [[x1, y1], [x2, y2]]) {
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('cx', cx); dot.setAttribute('cy', cy);
+      dot.setAttribute('r', '2.5');
+      dot.setAttribute('fill', '#ffaa00');
+      svg.appendChild(dot);
+    }
+  });
+}
+
+function getConnectorPin(partId, connectorId) {
+  const div = document.getElementById('cp-' + partId);
+  if (!div) return null;
+  return div.querySelector(`.connector-pin[data-connector-id="${connectorId}"]`);
+}
+
+// ===== TOOLS =====
+function setTool(tool) {
+  currentTool = tool;
+  document.querySelectorAll('.canvas-toolbar button').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('tool-' + tool);
+  if (btn) btn.classList.add('active');
+  
+  if (tool === 'wire') {
+    document.getElementById('statusText').textContent = '🔌 Click a connector pin to start a wire.';
+  } else {
+    document.getElementById('statusText').textContent = '✏️ Select and drag parts. Drag empty canvas to pan.';
+    cancelWireDrawing();
+  }
+  wrapper.style.cursor = tool === 'wire' ? 'crosshair' : 'default';
+}
+
+// ===== PAN =====
+let panState = null;
+
+wrapper.onmousedown = (e) => {
+  if (e.target.closest('.canvas-part')) return;
+  if (e.target.closest('.connector-pin')) return;
+  
+  panState = { sx: e.clientX, sy: e.clientY, vx: canvasState.viewport.x, vy: canvasState.viewport.y };
+  wrapper.style.cursor = 'grabbing';
+  
+  const onMove = (ev) => {
+    if (!panState) return;
+    canvasState.viewport.x = panState.vx + (ev.clientX - panState.sx);
+    canvasState.viewport.y = panState.vy + (ev.clientY - panState.sy);
+    applyViewport();
+  };
+  const onUp = () => {
+    panState = null;
+    wrapper.style.cursor = currentTool === 'wire' ? 'crosshair' : 'default';
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+};
+
+wrapper.onwheel = (e) => {
+  e.preventDefault();
+  const rect = wrapper.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  
+  const d = e.deltaY > 0 ? 0.9 : 1.1;
+  const newScale = Math.max(0.1, Math.min(5, canvasState.viewport.scale * d));
+  
+  const vp = canvasState.viewport;
+  vp.x = mx - (mx - vp.x) * (newScale / vp.scale);
+  vp.y = my - (my - vp.y) * (newScale / vp.scale);
+  vp.scale = newScale;
+  
+  applyViewport();
+};
+
+function drawGrid() {
+  const canvas = document.getElementById('gridCanvas');
+  const wrapper = document.getElementById('canvasWrapper');
+  const vp = canvasState.viewport;
+  
+  canvas.width = wrapper.clientWidth;
+  canvas.height = wrapper.clientHeight;
+  
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  const spacing = GRID_PX * vp.scale;
+  if (spacing < 4) return;
+  
+  ctx.strokeStyle = '#2a2a2a';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  
+  const offsetX = vp.x % spacing;
+  const offsetY = vp.y % spacing;
+  
+  for (let x = offsetX; x < canvas.width; x += spacing) {
+    ctx.moveTo(Math.round(x) + 0.5, 0);
+    ctx.lineTo(Math.round(x) + 0.5, canvas.height);
+  }
+  for (let y = offsetY; y < canvas.height; y += spacing) {
+    ctx.moveTo(0, Math.round(y) + 0.5);
+    ctx.lineTo(canvas.width, Math.round(y) + 0.5);
+  }
+  ctx.stroke();
+  
+  const majorSpacing = spacing * 5;
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = offsetX; x < canvas.width; x += spacing) {
+    if (Math.abs((x - offsetX) % majorSpacing) < 0.1) {
+      ctx.moveTo(Math.round(x) + 0.5, 0);
+      ctx.lineTo(Math.round(x) + 0.5, canvas.height);
+    }
+  }
+  for (let y = offsetY; y < canvas.height; y += spacing) {
+    if (Math.abs((y - offsetY) % majorSpacing) < 0.1) {
+      ctx.moveTo(0, Math.round(y) + 0.5);
+      ctx.lineTo(canvas.width, Math.round(y) + 0.5);
+    }
+  }
+  ctx.stroke();
+}
+
+function applyViewport() {
+  const vp = canvasState.viewport;
+  container.style.transform = `translate(${vp.x}px, ${vp.y}px) scale(${vp.scale})`;
+  container.style.transformOrigin = 'top left';
+  drawGrid();
+  renderWires();
+}
+
+// ===== URL STATE =====
+function saveStateToUrl() {
+  const state = {
+    p: canvasState.parts.map(pt => ({
+      i: pt.partIdx,
+      x: Math.round(pt.x * 10) / 10,
+      y: Math.round(pt.y * 10) / 10,
+      r: pt.rotation || 0
+    })),
+    w: canvasState.wires.map(w => {
+      const fi = canvasState.parts.findIndex(p => p.id === w.f);
+      const ti = canvasState.parts.findIndex(p => p.id === w.t);
+      return [fi, w.fc, ti, w.tc];
+    })
+  };
+  const json = JSON.stringify(state);
+  const compressed = btoa(encodeURIComponent(json)).replace(/=+$/, '');
+  window.location.hash = compressed;
+}
+
+function loadStateFromUrl() {
+  const hash = window.location.hash.slice(1);
+  if (!hash) return;
+  try {
+    const json = decodeURIComponent(atob(hash));
+    const state = JSON.parse(json);
+    
+    if (state.p) {
+      state.p.forEach(sp => {
+        const part = partsDB[sp.i];
+        if (!part) return;
+        const id = 'p' + (nextPartId++);
+        canvasState.parts.push({ partIdx: sp.i, id, x: sp.x || 0, y: sp.y || 0, rotation: sp.r || 0 });
+      });
+    }
+    
+    const renderPromises = canvasState.parts.map(p => renderPart(p.id));
+    Promise.all(renderPromises).then(() => {
+      if (state.w) {
+        state.w.forEach(w => {
+          const from = canvasState.parts[w[0]];
+          const to = canvasState.parts[w[2]];
+          if (from && to) {
+            canvasState.wires.push({ f: from.id, fc: w[1], t: to.id, tc: w[3] });
+          }
+        });
+        renderWires();
+      }
+      updateStatus();
+      if (canvasState.parts.length > 0) hideEmptyState();
+    });
+  } catch (e) {
+    console.error('Failed to load state:', e);
+  }
+}
+
+// ===== SHARE =====
+function copyShareLink() {
+  saveStateToUrl();
+  navigator.clipboard.writeText(window.location.href).then(() => {
+    document.getElementById('statusText').textContent = '✅ Share link copied!';
+    setTimeout(() => { document.getElementById('statusText').textContent = ''; updateStatus(); }, 2000);
+  }).catch(() => {
+    prompt('Copy this URL:', window.location.href);
+  });
+}
+
+// ===== CLEAR =====
+function clearAll() {
+  if (!confirm('Clear all parts and wires?')) return;
+  canvasState.parts = []; canvasState.wires = [];
+  container.innerHTML = '';
+  wiresSvg.innerHTML = '';
+  document.getElementById('emptyState').style.display = '';
+  updateStatus();
+  window.location.hash = '';
+}
+
+// ===== KEYBOARD =====
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    const sel = document.querySelector('.canvas-part.selected');
+    if (sel) { deletePart(sel.dataset.partId); e.preventDefault(); }
+  }
+  if (e.key === 'w' || e.key === 'W') setTool('wire');
+  if (e.key === 's' || e.key === 'S') setTool('select');
+  if (e.key === 'r' || e.key === 'R') {
+    const sel = document.querySelector('.canvas-part.selected');
+    if (sel) {
+      const st = canvasState.parts.find(p => p.id === sel.dataset.partId);
+      if (st) {
+        st.rotation = (st.rotation + 90) % 360;
+        sel.style.transform = `rotate(${st.rotation}deg)`;
+        renderWires();
+        saveStateToUrl();
+      }
+    }
+  }
+});
+
+function deletePart(partId) {
+  canvasState.wires = canvasState.wires.filter(w => w.f !== partId && w.t !== partId);
+  canvasState.parts = canvasState.parts.filter(p => p.id !== partId);
+  const el = document.getElementById('cp-' + partId);
+  if (el) el.remove();
+  renderWires();
+  updateStatus();
+  saveStateToUrl();
+  if (canvasState.parts.length === 0) document.getElementById('emptyState').style.display = '';
+}
+
+// ===== RESIZE =====
+window.addEventListener('resize', () => {
+  drawGrid();
+  renderWires();
+});
+
+// ===== INIT =====
+loadPartsDB();
+</script>
+</body>
+</html>
