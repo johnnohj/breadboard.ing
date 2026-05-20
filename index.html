@@ -358,9 +358,6 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
 
   <div class="canvas-container">
     <div class="canvas-toolbar">
-      <button onclick="setTool('select')" class="active" id="tool-select">✏️ Select</button>
-      <button onclick="setTool('wire')" id="tool-wire">🔌 Wire</button>
-      <span style="color:#444;width:1px;background:#3c3c3c;margin:2px 4px;"></span>
       <button onclick="clearAll()" class="danger">🗑️ Clear</button>
       <button onclick="copyShareLink()">🔗 Share</button>
     </div>
@@ -821,7 +818,6 @@ let canvasState = {
   wires: [],
   viewport: { x: 0, y: 0, scale: 1 }
 };
-let currentTool = 'select';
 let nextPartId = 1;
 let nextWireId = 1;
 let selectedWire = null; // wire ID string
@@ -1025,9 +1021,7 @@ const wrapper = document.getElementById('canvasWrapper');
 const wiresSvg = document.getElementById('wiresSvg');
 
 function updateStatus() {
-  document.getElementById('statusText').textContent = currentTool === 'wire' 
-    ? '🔌 Click a connector pin to start a wire.'
-    : '✏️ Select and drag parts. Drag empty canvas to pan.';
+  document.getElementById('statusText').textContent = '✏️ Select and drag parts. Click a connector pin to start a wire. Drag empty canvas to pan.';
   document.getElementById('statusCount').textContent = 
     `${canvasState.parts.length} parts, ${canvasState.wires.length} wires`;
 }
@@ -1637,7 +1631,7 @@ async function renderPart(partId) {
     
     pinDiv.onmousedown = (e) => {
       e.stopPropagation();
-      if (currentTool === 'wire') startWireDrawing(partId, conn.id, e);
+      startWireDrawing(partId, conn.id, e);
     };
     pinDiv.addEventListener('mouseenter', () => showConnectorLabel(partId, conn.id, conn.name || conn.id, pinDiv));
     pinDiv.addEventListener('mouseleave', hideConnectorLabel);
@@ -1686,8 +1680,6 @@ function makePartDraggable(div) {
   
   div.onmousedown = (e) => {
     if (e.target.classList.contains('connector-pin')) return;
-    if (currentTool !== 'select') return;
-    
     dragging = true;
     snapped = false;
     // Hide toolbar while dragging
@@ -2503,22 +2495,6 @@ function hideConnectorLabel() {
   clearNetHighlights();
 }
 
-// ===== TOOLS =====
-function setTool(tool) {
-  currentTool = tool;
-  document.querySelectorAll('.canvas-toolbar button').forEach(b => b.classList.remove('active'));
-  const btn = document.getElementById('tool-' + tool);
-  if (btn) btn.classList.add('active');
-  
-  if (tool === 'wire') {
-    document.getElementById('statusText').textContent = '🔌 Click a connector pin to start a wire.';
-  } else {
-    document.getElementById('statusText').textContent = '✏️ Select and drag parts. Drag empty canvas to pan.';
-    cancelWireDrawing();
-  }
-  wrapper.style.cursor = tool === 'wire' ? 'crosshair' : 'default';
-}
-
 // ===== PAN =====
 let panState = null;
 
@@ -2555,7 +2531,7 @@ wrapper.onmousedown = (e) => {
   };
   const onUp = () => {
     panState = null;
-    wrapper.style.cursor = currentTool === 'wire' ? 'crosshair' : 'default';
+    wrapper.style.cursor = 'default';
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
   };
@@ -2736,8 +2712,6 @@ document.addEventListener('keydown', (e) => {
     if (sel) { deletePart(sel.dataset.partId); e.preventDefault(); }
     else if (selectedWire) { deleteSelectedWire(); e.preventDefault(); }
   }
-  if (e.key === 'w' || e.key === 'W') setTool('wire');
-  if (e.key === 's' || e.key === 'S') setTool('select');
   if (e.key === 'r' || e.key === 'R') {
     const sel = document.querySelector('.canvas-part.selected');
     if (sel) {
