@@ -161,6 +161,10 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
   flex-shrink: 0;
 }
 
+.wire-actions { display: none; }
+.wire-actions.visible { display: flex; align-items: center; gap: 2px; }
+.part-actions.wire-mode { display: none; }
+
 .canvas-part svg { display: block; pointer-events: none; }
 .canvas-part .part-label {
   position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%);
@@ -182,6 +186,43 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
 }
 .connector-pin:hover { background: rgba(0, 120, 212, 0.4) !important; transform: scale(1.3); }
 .connector-pin.wire-source { background: rgba(255, 170, 0, 0.5) !important; }
+
+/* Wire interaction styles */
+.wire-selectable { cursor: pointer; }
+.wire-selectable:hover { opacity: 0.85; }
+.wire-selected { stroke: #4fc3f7 !important; stroke-width: 3.5 !important; }
+
+/* Wire curve handle */
+.wire-curve-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: #4fc3f7;
+  border: 2px solid #fff;
+  cursor: grab;
+  z-index: 201;
+  pointer-events: auto;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  transition: transform 0.1s;
+}
+.wire-curve-handle:hover { transform: scale(1.2); }
+.wire-curve-handle:active { cursor: grabbing; transform: scale(1.3); }
+
+/* Wire color dot in toolbar */
+.wire-color-input {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+}
+.wire-color-input::-webkit-color-swatch-wrapper { padding: 0; }
+.wire-color-input::-webkit-color-swatch { border: none; border-radius: 2px; }
 .connector-pin.snap-target {
   background: rgba(255, 170, 0, 0.25) !important;
   border-color: rgba(255, 170, 0, 0.6) !important;
@@ -317,16 +358,29 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
       </div>
       <div id="partsContainer"></div>
       <div class="selection-toolbar" id="selectionToolbar">
-        <button class="danger" onclick="deleteSelected()" title="Delete part (Delete)">🗑️</button>
-        <span class="sep"></span>
-        <button onclick="rotateSelected(-90)" title="Rotate left">↪️</button>
-        <button onclick="rotateSelected(90)" title="Rotate right">↩️</button>
-        <span class="sep"></span>
-        <button onclick="zOrderSelected('backward')" title="Send backward">⬇️</button>
-        <button onclick="zOrderSelected('forward')" title="Bring forward">⬆️</button>
-        <span class="sep"></span>
-        <button onclick="zOrderSelected('back')" title="Send to back">⏬</button>
-        <button onclick="zOrderSelected('front')" title="Bring to front">⏫</button>
+        <!-- Part actions -->
+        <span class="part-actions" id="partActions">
+          <button class="danger" onclick="deleteSelected()" title="Delete part (Delete)">🗑️</button>
+          <span class="sep"></span>
+          <button onclick="rotateSelected(-90)" title="Rotate left">↪️</button>
+          <button onclick="rotateSelected(90)" title="Rotate right">↩️</button>
+          <span class="sep"></span>
+          <button onclick="zOrderSelected('backward')" title="Send backward">⬇️</button>
+          <button onclick="zOrderSelected('forward')" title="Bring forward">⬆️</button>
+          <span class="sep"></span>
+          <button onclick="zOrderSelected('back')" title="Send to back">⏬</button>
+          <button onclick="zOrderSelected('front')" title="Bring to front">⏫</button>
+        </span>
+        <!-- Wire actions -->
+        <span class="wire-actions" id="wireActions">
+          <button class="danger" onclick="deleteSelectedWire()" title="Delete wire (Delete)">🗑️</button>
+          <span class="sep"></span>
+          <label style="display:flex;align-items:center;gap:4px;padding:2px 6px;color:#aaa;font-size:12px;cursor:pointer" title="Wire color">
+            <input type="color" class="wire-color-input" id="wireColorPicker" value="#ffaa00" oninput="changeWireColor(this.value)">
+          </label>
+          <span class="sep"></span>
+          <button onclick="resetWireCurve()" title="Reset curve">↩️</button>
+        </span>
       </div>
       <div class="connector-label" id="connectorLabel"></div>
       <svg class="wire-drawing-line" id="wireDrawingLine" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:60">
@@ -678,7 +732,10 @@ let canvasState = {
 };
 let currentTool = 'select';
 let nextPartId = 1;
+let nextWireId = 1;
+let selectedWire = null; // wire ID string
 let wireDrawing = null;
+let wireCurveDragging = null; // for the curve handle drag
 
 const SVG_SCALE = 1.5;
 
@@ -711,10 +768,15 @@ function computePartSnapPoints(part, displayScale) {
   return points;
 }
 
+/** Find a part in the database by its stable module ID. */
+function findPartInDB(partId) {
+  return partsDB.find(p => p.id === partId);
+}
+
 /** Snap a raw drag position to the closest position that aligns a connector-based snap point to the grid.
  * Falls back to top-left corner snap when no snap points exist. */
 function snapWithPart(partState, rawX, rawY) {
-  const part = partsDB[partState.partIdx];
+  const part = findPartInDB(partState.partId);
   if (!part) return { x: snap(rawX), y: snap(rawY), snapPoint: null };
   
   const ds = partState.displayScale || SVG_SCALE;
@@ -749,7 +811,7 @@ function getPartDisplayScale(part) {
  * part's displayScale to convert to display pixels.
  * Filtered to only include connectors listed in the part's connectors array. */
 function getConnectorWorldPositions(partState) {
-  const part = partsDB[partState.partIdx];
+  const part = findPartInDB(partState.partId);
   if (!part || !part.connector_positions) return [];
   
   const ds = partState.displayScale || SVG_SCALE;
@@ -772,8 +834,8 @@ function getConnectorWorldPositions(partState) {
 /** Find mated connector pairs between two parts and auto-connect wires.
  * Connector positions in pixel coordinates. */
 function autoConnectMatedConnectors(draggedPartId, otherPartId, draggedState, otherState) {
-  const draggedPart = partsDB[draggedState.partIdx];
-  const otherPart = partsDB[otherState.partIdx];
+  const draggedPart = findPartInDB(draggedState.partId);
+  const otherPart = findPartInDB(otherState.partId);
   if (!draggedPart || !otherPart) return 0;
   
   const draggedConns = draggedPart.connector_positions || {};
@@ -800,8 +862,11 @@ function autoConnectMatedConnectors(draggedPartId, otherPartId, draggedState, ot
         );
         if (!exists) {
           canvasState.wires.push({
+            id: 'w' + (nextWireId++),
             f: draggedPartId, fc: dcid,
-            t: otherPartId, tc: ocid
+            t: otherPartId, tc: ocid,
+            color: '#ffaa00',
+            curve: 0
           });
           count++;
           // Highlight connected pins with snapped class
@@ -832,18 +897,19 @@ function addPartToCanvas(partIdx) {
   const part = partsDB[partIdx];
   if (!part) return;
   
+  const partId = part.id;
   const id = 'p' + (nextPartId++);
   const vp = canvasState.viewport;
   const cx = wrapper.clientWidth / 2 - vp.x;
   const cy = wrapper.clientHeight / 2 - vp.y;
   const displayScale = getPartDisplayScale(part);
-  const rawState = { partIdx, x: (cx - 100) / vp.scale, y: (cy - 50) / vp.scale, displayScale };
+  const rawState = { partId, x: (cx - 100) / vp.scale, y: (cy - 50) / vp.scale, displayScale };
   const snapped = snapWithPart(rawState, rawState.x, rawState.y);
   const x = snapped.x;
   const y = snapped.y;
   
   canvasState.parts.push({
-    partIdx, id, x, y, rotation: 0, displayScale
+    partId, id, x, y, rotation: 0, displayScale
   });
   
   renderPart(id);
@@ -864,6 +930,7 @@ wrapper.ondrop = (e) => {
   const part = partsDB[partIdx];
   if (!part) return;
   
+  const partId = part.id;
   const rect = wrapper.getBoundingClientRect();
   const vp = canvasState.viewport;
   const rawX = (e.clientX - rect.left - vp.x) / vp.scale - 50;
@@ -871,9 +938,9 @@ wrapper.ondrop = (e) => {
   
   const id = 'p' + (nextPartId++);
   const displayScale = getPartDisplayScale(part);
-  const rawState = { partIdx, x: rawX, y: rawY, displayScale };
+  const rawState = { partId, x: rawX, y: rawY, displayScale };
   const snapped = snapWithPart(rawState, rawX, rawY);
-  const newState = { partIdx, id, x: snapped.x, y: snapped.y, rotation: 0, displayScale };
+  const newState = { partId, id, x: snapped.x, y: snapped.y, rotation: 0, displayScale };
   canvasState.parts.push(newState);
   renderPart(id);
   
@@ -925,7 +992,7 @@ wrapper.ondrop = (e) => {
 async function renderPart(partId) {
   const state = canvasState.parts.find(p => p.id === partId);
   if (!state) return;
-  const part = partsDB[state.partIdx];
+  const part = findPartInDB(state.partId);
   if (!part) return;
   
   const existing = document.getElementById('cp-' + partId);
@@ -1059,17 +1126,7 @@ async function renderPart(partId) {
   originMarker.innerHTML = '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="2.5" fill="none" stroke="#4fc3f7" stroke-width="1.5" opacity="0.8"/><line x1="0" y1="4" x2="8" y2="4" stroke="#4fc3f7" stroke-width="0.5" opacity="0.4"/><line x1="4" y1="0" x2="4" y2="8" stroke="#4fc3f7" stroke-width="0.5" opacity="0.4"/></svg>';
   div.appendChild(originMarker);
   
-  // Add count badge of on-grid connectors
-  const snapBadge = document.createElement('div');
-  snapBadge.className = 'snap-badge';
-  snapBadge.style.cssText = 'position:absolute;left:10px;top:-2px;font-size:9px;color:#4fc3f7;pointer-events:none;z-index:10;font-family:sans-serif;opacity:0.7;white-space:nowrap;';
-  const rawSp = part.grid_snap_points || [];
-  if (rawSp.length > 0) {
-    snapBadge.textContent = rawSp.map(s => s.onGrid.length).join('/') + ' on grid';
-  } else {
-    snapBadge.textContent = 'corner snap';
-  }
-  div.appendChild(snapBadge);
+
   
   // Draw persistent snap point anchor markers
   const snapPoints = part.grid_snap_points || [];
@@ -1178,7 +1235,7 @@ function makePartDraggable(div) {
       }
       
       // Highlight on-grid connectors based on current snap position
-      const part = partsDB[st.partIdx];
+      const part = findPartInDB(st.partId);
       const curSnapPoints = part ? computePartSnapPoints(part) : [];
       if (curSnapPoints.length > 0) {
         // Clear previous on-grid highlights
@@ -1274,10 +1331,23 @@ const selectionToolbar = document.getElementById('selectionToolbar');
 
 function updateSelectionToolbar() {
   const sel = document.querySelector('.canvas-part.selected');
+  const partActions = document.getElementById('partActions');
+  const wireActions = document.getElementById('wireActions');
+  
   if (!sel) {
-    selectionToolbar.classList.remove('visible');
+    if (!selectedWire) {
+      selectionToolbar.classList.remove('visible');
+    }
     return;
   }
+  
+  // If a wire is also selected, deselect wire
+  if (selectedWire) {
+    selectWire(null);
+  }
+  
+  wireActions.classList.remove('visible');
+  partActions.style.display = '';
   
   // Position the toolbar above the selected part, centered horizontally
   const wrapperRect = wrapper.getBoundingClientRect();
@@ -1361,6 +1431,126 @@ function zOrderSelected(action) {
   saveStateToUrl();
 }
 
+// ===== WIRE SELECTION & MANAGEMENT =====
+
+/** Sample points along a quadratic bezier and check distance from (px, py) */
+function hitTestBezier(x1, y1, cx, cy, x2, y2, px, py, threshold) {
+  const steps = 30;
+  for (let t = 0; t <= 1; t += 1/steps) {
+    const mt = 1 - t;
+    const bx = mt*mt * x1 + 2*mt*t * cx + t*t * x2;
+    const by = mt*mt * y1 + 2*mt*t * cy + t*t * y2;
+    if (Math.hypot(bx - px, by - py) < threshold) return true;
+  }
+  return false;
+}
+
+/** Find the topmost wire at the given wrapper-relative coordinates */
+function findWireAtPoint(px, py) {
+  const rect = wrapper.getBoundingClientRect();
+  // Iterate in reverse (topmost wires drawn last)
+  for (let i = canvasState.wires.length - 1; i >= 0; i--) {
+    const w = canvasState.wires[i];
+    const fromPin = getConnectorPin(w.f, w.fc);
+    const toPin = getConnectorPin(w.t, w.tc);
+    if (!fromPin || !toPin) continue;
+    
+    const fRect = fromPin.getBoundingClientRect();
+    const tRect = toPin.getBoundingClientRect();
+    const x1 = fRect.left + fRect.width/2 - rect.left;
+    const y1 = fRect.top + fRect.height/2 - rect.top;
+    const x2 = tRect.left + tRect.width/2 - rect.left;
+    const y2 = tRect.top + tRect.height/2 - rect.top;
+    
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+    const offset = w.curve || 0;
+    const cpx = mx + nx * offset;
+    const cpy = my + ny * offset;
+    
+    if (hitTestBezier(x1, y1, cpx, cpy, x2, y2, px, py, 8)) {
+      return w.id;
+    }
+  }
+  return null;
+}
+
+function selectWire(wireId) {
+  selectedWire = wireId;
+  document.querySelectorAll('.connector-pin.net-highlight').forEach(el => el.classList.remove('net-highlight'));
+  renderWires();
+  updateWireSelectionToolbar();
+  if (wireId) updateStatus();
+}
+
+function deleteSelectedWire() {
+  if (!selectedWire) return;
+  const idx = canvasState.wires.findIndex(w => w.id === selectedWire);
+  if (idx === -1) return;
+  canvasState.wires.splice(idx, 1);
+  selectedWire = null;
+  document.getElementById('wireCurveHandle')?.remove();
+  renderWires();
+  updateStatus();
+  updateWireSelectionToolbar();
+  saveStateToUrl();
+}
+
+function changeWireColor(color) {
+  if (!selectedWire) return;
+  const wire = canvasState.wires.find(w => w.id === selectedWire);
+  if (!wire) return;
+  wire.color = color;
+  renderWires();
+  saveStateToUrl();
+}
+
+function resetWireCurve() {
+  if (!selectedWire) return;
+  const wire = canvasState.wires.find(w => w.id === selectedWire);
+  if (!wire) return;
+  wire.curve = 0;
+  renderWires();
+  saveStateToUrl();
+}
+
+function updateWireSelectionToolbar() {
+  const partActions = document.getElementById('partActions');
+  const wireActions = document.getElementById('wireActions');
+  
+  if (selectedWire) {
+    partActions.style.display = 'none';
+    wireActions.classList.add('visible');
+    selectionToolbar.classList.add('visible');
+    
+    const wire = canvasState.wires.find(w => w.id === selectedWire);
+    if (wire) {
+      document.getElementById('wireColorPicker').value = wire.color || '#ffaa00';
+    }
+    
+    // Position toolbar centered at top of viewport
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const toolbarLeft = wrapperRect.width / 2;
+    const toolbarTop = 12;
+    selectionToolbar.style.left = toolbarLeft + 'px';
+    selectionToolbar.style.top = toolbarTop + 'px';
+    selectionToolbar.style.transform = 'translateX(-50%)';
+  } else if (document.querySelector('.canvas-part.selected')) {
+    // Part is selected - handled by updateSelectionToolbar
+    wireActions.classList.remove('visible');
+    partActions.style.display = '';
+  } else {
+    wireActions.classList.remove('visible');
+    partActions.style.display = '';
+    selectionToolbar.classList.remove('visible');
+  }
+}
+
 // ===== WIRE DRAWING =====
 function startWireDrawing(partId, connectorId, e) {
   const div = document.getElementById('cp-' + partId);
@@ -1418,8 +1608,11 @@ function completeWire(toPartId, toConnector) {
   );
   if (!exists) {
     canvasState.wires.push({
+      id: 'w' + (nextWireId++),
       f: wireDrawing.fromPartId, fc: wireDrawing.fromConnector,
-      t: toPartId, tc: toConnector
+      t: toPartId, tc: toConnector,
+      color: '#ffaa00',
+      curve: 0
     });
     renderWires();
     updateStatus();
@@ -1433,6 +1626,7 @@ function renderWires() {
   svg.innerHTML = '';
   
   const rect = wrapper.getBoundingClientRect();
+  const selPart = document.querySelector('.canvas-part.selected');
   
   canvasState.wires.forEach(w => {
     const fromPin = getConnectorPin(w.f, w.fc);
@@ -1446,25 +1640,171 @@ function renderWires() {
     const x2 = tRect.left + tRect.width/2 - rect.left;
     const y2 = tRect.top + tRect.height/2 - rect.top;
     
-    const selected = document.querySelector('.canvas-part.selected');
-    const hl = selected && (w.f === selected.dataset.partId || w.t === selected.dataset.partId);
+    const partHl = selPart && (w.f === selPart.dataset.partId || w.t === selPart.dataset.partId);
+    const wireSel = (selectedWire === w.id);
+    const isSelected = wireSel || partHl;
     
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
-    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
-    line.setAttribute('stroke', hl ? '#4fc3f7' : '#ffaa00');
-    line.setAttribute('stroke-width', hl ? '3' : '2');
-    line.setAttribute('stroke-linecap', 'round');
-    svg.appendChild(line);
+    // Compute bezier control points
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy) || 1;
+    // Perpendicular offset direction
+    const nx = -dy / len;
+    const ny = dx / len;
+    const offset = w.curve || 0;
+    const cx = mx + nx * offset;
+    const cy = my + ny * offset;
     
-    for (const [cx, cy] of [[x1, y1], [x2, y2]]) {
+    const strokeColor = wireSel ? '#4fc3f7' : (w.color || '#ffaa00');
+    const strokeWidth = wireSel ? '3.5' : (partHl ? '3' : '2');
+    
+    // Draw the visible bezier path
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const d = `M ${x1} ${y1} Q ${cx} ${cy}, ${x2} ${y2}`;
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', strokeColor);
+    path.setAttribute('stroke-width', strokeWidth);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('data-wire-id', w.id);
+    path.classList.add('wire-selectable');
+    if (wireSel) path.classList.add('wire-selected');
+    svg.appendChild(path);
+    
+    // Draw a wider invisible path for easier click targeting (used by isPointInStroke)
+    const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    hitPath.setAttribute('d', d);
+    hitPath.setAttribute('stroke', 'transparent');
+    hitPath.setAttribute('stroke-width', '14');
+    hitPath.setAttribute('fill', 'none');
+    hitPath.setAttribute('data-wire-id', w.id);
+    hitPath.setAttribute('data-hit', '1');
+    svg.appendChild(hitPath);
+    
+    // Endpoint dots
+    const dotColor = wireSel ? '#4fc3f7' : (w.color || '#ffaa00');
+    for (const [cx2, cy2] of [[x1, y1], [x2, y2]]) {
       const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      dot.setAttribute('cx', cx); dot.setAttribute('cy', cy);
+      dot.setAttribute('cx', cx2); dot.setAttribute('cy', cy2);
       dot.setAttribute('r', '2.5');
-      dot.setAttribute('fill', '#ffaa00');
+      dot.setAttribute('fill', dotColor);
       svg.appendChild(dot);
     }
   });
+  
+  // Update wire curve handle
+  updateWireCurveHandle();
+}
+
+/** Update or remove the wire curve drag handle */
+function updateWireCurveHandle() {
+  let handle = document.getElementById('wireCurveHandle');
+  if (!selectedWire) {
+    if (handle) handle.remove();
+    return;
+  }
+  
+  const w = canvasState.wires.find(w => w.id === selectedWire);
+  if (!w) {
+    if (handle) handle.remove();
+    selectedWire = null;
+    return;
+  }
+  
+  const fromPin = getConnectorPin(w.f, w.fc);
+  const toPin = getConnectorPin(w.t, w.tc);
+  if (!fromPin || !toPin) {
+    if (handle) handle.remove();
+    return;
+  }
+  
+  const rect = wrapper.getBoundingClientRect();
+  const fRect = fromPin.getBoundingClientRect();
+  const tRect = toPin.getBoundingClientRect();
+  const x1 = fRect.left + fRect.width/2 - rect.left;
+  const y1 = fRect.top + fRect.height/2 - rect.top;
+  const x2 = tRect.left + tRect.width/2 - rect.left;
+  const y2 = tRect.top + tRect.height/2 - rect.top;
+  
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const offset = w.curve || 0;
+  
+  const hx = mx + nx * offset;
+  const hy = my + ny * offset;
+  
+  if (!handle) {
+    handle = document.createElement('div');
+    handle.id = 'wireCurveHandle';
+    handle.className = 'wire-curve-handle';
+    handle.title = 'Drag to bend wire';
+    wrapper.appendChild(handle);
+    
+    handle.onmousedown = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      wireCurveDragging = { wireId: selectedWire };
+      const onMove = (ev) => {
+        if (!wireCurveDragging) return;
+        const wire = canvasState.wires.find(ww => ww.id === wireCurveDragging.wireId);
+        if (!wire) { cancelWireCurveDrag(); return; }
+        
+        const fp = getConnectorPin(wire.f, wire.fc);
+        const tp = getConnectorPin(wire.t, wire.tc);
+        if (!fp || !tp) { cancelWireCurveDrag(); return; }
+        
+        const r = wrapper.getBoundingClientRect();
+        const fr = fp.getBoundingClientRect();
+        const tr = tp.getBoundingClientRect();
+        const px1 = fr.left + fr.width/2 - r.left;
+        const py1 = fr.top + fr.height/2 - r.top;
+        const px2 = tr.left + tr.width/2 - r.left;
+        const py2 = tr.top + tr.height/2 - r.top;
+        
+        const pmx = (px1 + px2) / 2;
+        const pmy = (py1 + py2) / 2;
+        const pdx = px2 - px1;
+        const pdy = py2 - py1;
+        const plen = Math.hypot(pdx, pdy) || 1;
+        const pnx = -pdy / plen;
+        const pny = pdx / plen;
+        
+        // Mouse position in wrapper coordinates
+        const mxx = ev.clientX - r.left;
+        const myy = ev.clientY - r.top;
+        
+        // Signed distance from midpoint along perpendicular
+        const dist = (mxx - pmx) * pnx + (myy - pmy) * pny;
+        wire.curve = Math.round(dist * 10) / 10;
+        
+        renderWires();
+        saveStateToUrl();
+      };
+      const onUp = () => {
+        wireCurveDragging = null;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    };
+  }
+  
+  // Adjust handle position for current viewport
+  const wrapperRect = wrapper.getBoundingClientRect();
+  handle.style.left = (hx) + 'px';
+  handle.style.top = (hy) + 'px';
+}
+
+function cancelWireCurveDrag() {
+  wireCurveDragging = null;
 }
 
 function getConnectorPin(partId, connectorId) {
@@ -1579,8 +1919,22 @@ wrapper.onmousedown = (e) => {
   if (e.target.closest('.canvas-part')) return;
   if (e.target.closest('.connector-pin')) return;
   if (e.target.closest('.selection-toolbar')) return;
+  if (e.target.closest('.wire-curve-handle')) return;
+  
+  // Check if clicking near a wire using geometric hit testing
+  // We sample points along each wire's bezier path and check distance
+  const wrapperRect2 = wrapper.getBoundingClientRect();
+  const clickX = e.clientX - wrapperRect2.left;
+  const clickY = e.clientY - wrapperRect2.top;
+  let hitWireId = findWireAtPoint(clickX, clickY);
+  if (hitWireId) {
+    selectPart(null);
+    selectWire(hitWireId);
+    return;
+  }
   
   // Deselect on empty canvas click
+  selectWire(null);
   selectPart(null);
   
   panState = { sx: e.clientX, sy: e.clientY, vx: canvasState.viewport.x, vy: canvasState.viewport.y };
@@ -1682,7 +2036,7 @@ function applyViewport() {
 function saveStateToUrl() {
   const state = {
     p: canvasState.parts.map(pt => ({
-      i: pt.partIdx,
+      i: pt.partId,
       x: Math.round(pt.x * 10) / 10,
       y: Math.round(pt.y * 10) / 10,
       r: pt.rotation || 0
@@ -1690,7 +2044,7 @@ function saveStateToUrl() {
     w: canvasState.wires.map(w => {
       const fi = canvasState.parts.findIndex(p => p.id === w.f);
       const ti = canvasState.parts.findIndex(p => p.id === w.t);
-      return [fi, w.fc, ti, w.tc];
+      return [fi, w.fc, ti, w.tc, w.color || '#ffaa00', w.curve || 0];
     })
   };
   const json = JSON.stringify(state);
@@ -1707,11 +2061,11 @@ function loadStateFromUrl() {
     
     if (state.p) {
       state.p.forEach(sp => {
-        const part = partsDB[sp.i];
+        const part = findPartInDB(sp.i);
         if (!part) return;
         const id = 'p' + (nextPartId++);
         const displayScale = getPartDisplayScale(part);
-        canvasState.parts.push({ partIdx: sp.i, id, x: sp.x || 0, y: sp.y || 0, rotation: sp.r || 0, displayScale });
+        canvasState.parts.push({ partId: sp.i, id, x: sp.x || 0, y: sp.y || 0, rotation: sp.r || 0, displayScale });
       });
     }
     
@@ -1722,7 +2076,13 @@ function loadStateFromUrl() {
           const from = canvasState.parts[w[0]];
           const to = canvasState.parts[w[2]];
           if (from && to) {
-            canvasState.wires.push({ f: from.id, fc: w[1], t: to.id, tc: w[3] });
+            canvasState.wires.push({
+              id: 'w' + (nextWireId++),
+              f: from.id, fc: w[1],
+              t: to.id, tc: w[3],
+              color: w[4] || '#ffaa00',
+              curve: w[5] || 0
+            });
           }
         });
         renderWires();
@@ -1749,10 +2109,12 @@ function copyShareLink() {
 // ===== CLEAR =====
 function clearAll() {
   if (!confirm('Clear all parts and wires?')) return;
-  canvasState.parts = []; canvasState.wires = [];
+  canvasState.parts = []; canvasState.wires = []; selectedWire = null;
+  document.getElementById('wireCurveHandle')?.remove();
   container.innerHTML = '';
   wiresSvg.innerHTML = '';
   document.getElementById('emptyState').style.display = '';
+  updateWireSelectionToolbar();
   updateStatus();
   window.location.hash = '';
 }
@@ -1762,6 +2124,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Delete' || e.key === 'Backspace') {
     const sel = document.querySelector('.canvas-part.selected');
     if (sel) { deletePart(sel.dataset.partId); e.preventDefault(); }
+    else if (selectedWire) { deleteSelectedWire(); e.preventDefault(); }
   }
   if (e.key === 'w' || e.key === 'W') setTool('wire');
   if (e.key === 's' || e.key === 'S') setTool('select');
@@ -1790,10 +2153,14 @@ document.addEventListener('keydown', (e) => {
 });
 
 function deletePart(partId) {
-  canvasState.wires = canvasState.wires.filter(w => w.f !== partId && w.t !== partId);
+  canvasState.wires = canvasState.wires.filter(w => {
+    if (w.id === selectedWire) selectedWire = null;
+    return w.f !== partId && w.t !== partId;
+  });
   canvasState.parts = canvasState.parts.filter(p => p.id !== partId);
   const el = document.getElementById('cp-' + partId);
   if (el) el.remove();
+  document.getElementById('wireCurveHandle')?.remove();
   renderWires();
   updateStatus();
   saveStateToUrl();
