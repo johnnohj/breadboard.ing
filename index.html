@@ -808,13 +808,22 @@ function getPartDisplayScale(part) {
 
 /** Return absolute positions of all connectors for a part state in pixel coordinates.
  * Connector positions from the database are in SVG viewBox units; multiply by the
- * part's displayScale to convert to display pixels.
+ * part's displayScale to convert to display pixels. Accounts for part rotation.
  * Filtered to only include connectors listed in the part's connectors array. */
 function getConnectorWorldPositions(partState) {
   const part = findPartInDB(partState.partId);
   if (!part || !part.connector_positions) return [];
   
   const ds = partState.displayScale || SVG_SCALE;
+  const rot = (partState.rotation || 0) * Math.PI / 180;
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  
+  // Part center in pixel coords (relative to top-left)
+  const svgW = partState.svgW || 0;
+  const svgH = partState.svgH || 0;
+  const cx = svgW * ds / 2;
+  const cy = svgH * ds / 2;
   
   // Only use connectors that are officially part of this part
   const knownIds = new Set((part.connectors || []).map(c => c.id));
@@ -822,10 +831,21 @@ function getConnectorWorldPositions(partState) {
   const results = [];
   for (const [cid, pos] of Object.entries(part.connector_positions)) {
     if (!knownIds.has(cid)) continue;
+    // Connector offset from center (pixel coords)
+    const rx = pos.x * ds - cx;
+    const ry = pos.y * ds - cy;
+    let absX, absY;
+    if (svgW && svgH && rot) {
+      // Rotate around center
+      absX = partState.x + cx + rx * cos - ry * sin;
+      absY = partState.y + cy + rx * sin + ry * cos;
+    } else {
+      absX = partState.x + pos.x * ds;
+      absY = partState.y + pos.y * ds;
+    }
     results.push({
       connectorId: cid,
-      absX: partState.x + pos.x * ds,
-      absY: partState.y + pos.y * ds
+      absX, absY
     });
   }
   return results;
@@ -843,17 +863,44 @@ function autoConnectMatedConnectors(draggedPartId, otherPartId, draggedState, ot
   
   const ds = draggedState.displayScale || SVG_SCALE;
   const os = otherState.displayScale || SVG_SCALE;
+  
+  // Precompute rotation data for both parts
+  const dRot = (draggedState.rotation || 0) * Math.PI / 180;
+  const dCos = Math.cos(dRot), dSin = Math.sin(dRot);
+  const dSvgW = draggedState.svgW || 0, dSvgH = draggedState.svgH || 0;
+  const dCx = dSvgW * ds / 2, dCy = dSvgH * ds / 2;
+  
+  const oRot = (otherState.rotation || 0) * Math.PI / 180;
+  const oCos = Math.cos(oRot), oSin = Math.sin(oRot);
+  const oSvgW = otherState.svgW || 0, oSvgH = otherState.svgH || 0;
+  const oCx = oSvgW * os / 2, oCy = oSvgH * os / 2;
+  
+  function draggedWorldPos(pidx, pidy) {
+    if (dSvgW && dSvgH && dRot) {
+      const rx = pidx * ds - dCx;
+      const ry = pidy * ds - dCy;
+      return { x: draggedState.x + dCx + rx * dCos - ry * dSin, y: draggedState.y + dCy + rx * dSin + ry * dCos };
+    }
+    return { x: draggedState.x + pidx * ds, y: draggedState.y + pidy * ds };
+  }
+  function otherWorldPos(pidx, pidy) {
+    if (oSvgW && oSvgH && oRot) {
+      const rx = pidx * os - oCx;
+      const ry = pidy * os - oCy;
+      return { x: otherState.x + oCx + rx * oCos - ry * oSin, y: otherState.y + oCy + rx * oSin + ry * oCos };
+    }
+    return { x: otherState.x + pidx * os, y: otherState.y + pidy * os };
+  }
+  
   let count = 0;
   for (const [dcid, dpos] of Object.entries(draggedConns)) {
-    const dAbsX = draggedState.x + dpos.x * ds;
-    const dAbsY = draggedState.y + dpos.y * ds;
+    const dp = draggedWorldPos(dpos.x, dpos.y);
     
     for (const [ocid, opos] of Object.entries(otherConns)) {
-      const oAbsX = otherState.x + opos.x * os;
-      const oAbsY = otherState.y + opos.y * os;
+      const op = otherWorldPos(opos.x, opos.y);
       
-      const dx = dAbsX - oAbsX;
-      const dy = dAbsY - oAbsY;
+      const dx = dp.x - op.x;
+      const dy = dp.y - op.y;
       if (Math.abs(dx) < 1.5 && Math.abs(dy) < 1.5) {
         // Connectors are aligned - create wire if one doesn't already exist
         const exists = canvasState.wires.some(w => 
@@ -866,7 +913,8 @@ function autoConnectMatedConnectors(draggedPartId, otherPartId, draggedState, ot
             f: draggedPartId, fc: dcid,
             t: otherPartId, tc: ocid,
             color: '#ffaa00',
-            curve: 0
+            curve: 0,
+            auto: true
           });
           count++;
           // Highlight connected pins with snapped class
@@ -1023,6 +1071,9 @@ async function renderPart(partId) {
   const vbParts = vb.split(/\s+/).map(Number);
   const svgW = vbParts[2] || 100;
   const svgH = vbParts[3] || 100;
+  // Store SVG dimensions on state for rotation-aware position calculations
+  state.svgW = svgW;
+  state.svgH = svgH;
   
   const ds = state.displayScale || SVG_SCALE;
   const dispW = svgW * ds;
@@ -1166,6 +1217,18 @@ function makePartDraggable(div) {
     selectPart(div.dataset.partId);
     const st = canvasState.parts.find(p => p.id === div.dataset.partId);
     if (!st) return;
+    
+    // Remove auto-created wires immediately so they don't show during drag
+    canvasState.wires = canvasState.wires.filter(w => {
+      if ((w.f === st.id || w.t === st.id) && w.auto) {
+        if (w.id === selectedWire) selectedWire = null;
+        return false;
+      }
+      return true;
+    });
+    renderWires();
+    updateStatus();
+    
     startX = e.clientX; startY = e.clientY;
     origX = st.x; origY = st.y;
     
@@ -1284,17 +1347,36 @@ function makePartDraggable(div) {
       // Clean up any leftover snap-target highlights
       document.querySelectorAll('.connector-pin.snap-target').forEach(el => el.classList.remove('snap-target'));
       
-      // Auto-connect mated connectors after snap
-      if (snapped) {
+      // Check if the dragged part is aligned with any other part's connectors
+      // at its final position (not just at some point during the drag).
+      const finalConns = getConnectorWorldPositions(st);
+      let finalSnapFound = false;
+      for (const otherState of canvasState.parts) {
+        if (otherState.id === st.id) continue;
+        const otherConns = getConnectorWorldPositions(otherState);
+        if (otherConns.length === 0) continue;
+        for (const dc of finalConns) {
+          for (const oc of otherConns) {
+            if (Math.hypot(oc.absX - dc.absX, oc.absY - dc.absY) < CONNECTOR_SNAP_THRESHOLD) {
+              finalSnapFound = true;
+              break;
+            }
+          }
+          if (finalSnapFound) break;
+        }
+        if (finalSnapFound) break;
+      }
+
+      if (finalSnapFound) {
+        // Part is aligned with another part — auto-connect mated connectors
         let wireCount = 0;
-        const draggedConns = getConnectorWorldPositions(st);
         for (const otherState of canvasState.parts) {
           if (otherState.id === st.id) continue;
           wireCount += autoConnectMatedConnectors(st.id, otherState.id, st, otherState);
         }
+        renderWires();
+        updateStatus();
         if (wireCount > 0) {
-          renderWires();
-          updateStatus();
           document.getElementById('statusText').textContent = 
             `🔗 Connected ${wireCount} wire${wireCount > 1 ? 's' : ''}!`;
           // Flash snapped connectors green briefly
@@ -1303,6 +1385,9 @@ function makePartDraggable(div) {
           }, 1500);
           setTimeout(() => { document.getElementById('statusText').textContent = ''; updateStatus(); }, 2000);
         }
+      } else {
+        renderWires();
+        updateStatus();
       }
       
       // Re-show toolbar after drag
@@ -2044,7 +2129,7 @@ function saveStateToUrl() {
     w: canvasState.wires.map(w => {
       const fi = canvasState.parts.findIndex(p => p.id === w.f);
       const ti = canvasState.parts.findIndex(p => p.id === w.t);
-      return [fi, w.fc, ti, w.tc, w.color || '#ffaa00', w.curve || 0];
+      return [fi, w.fc, ti, w.tc, w.color || '#ffaa00', w.curve || 0, w.auto ? 1 : 0];
     })
   };
   const json = JSON.stringify(state);
@@ -2081,7 +2166,8 @@ function loadStateFromUrl() {
               f: from.id, fc: w[1],
               t: to.id, tc: w[3],
               color: w[4] || '#ffaa00',
-              curve: w[5] || 0
+              curve: w[5] || 0,
+              auto: w[6] === 1
             });
           }
         });
