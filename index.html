@@ -293,6 +293,24 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
 .empty-state h2 { font-size: 24px; margin-bottom: 8px; }
 .empty-state p { font-size: 14px; }
 
+/* Drop zone highlight when dragging files over the canvas */
+.canvas-wrapper.drag-over::after {
+  content: '📁 Drop .fzpz File';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 120, 212, 0.08);
+  border: 3px dashed #0078d4;
+  color: #0078d4;
+  font-size: 20px;
+  font-weight: 600;
+  z-index: 1000;
+  pointer-events: none;
+  backdrop-filter: blur(2px);
+}
+
 .loading {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: #1e1e1e; display: flex; align-items: center; justify-content: center;
@@ -352,6 +370,7 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
       <div class="empty-state" id="emptyState">
         <h2>📐 Drop Parts Here</h2>
         <p>Click + on a part in the sidebar, or drag it here</p>
+        <p style="font-size:12px;margin-top:6px;color:#555">📁 Or drop a .fzpz file anywhere</p>
       </div>
       <div class="wires-overlay" id="wiresOverlay">
         <svg id="wiresSvg"></svg>
@@ -398,9 +417,79 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
 // ===== SVG LOADER =====
 const svgCache = {};
 
+// Cache for SVGs loaded from dropped files (local .fzpz files)
+const droppedPartSvg = {};
+
+// IndexedDB for persistent storage of dropped parts
+const DB_NAME = 'breadboard-dropped-parts';
+const DB_VERSION = 1;
+let dbPromise = null;
+
+function openDroppedPartsDb() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('parts')) {
+        db.createObjectStore('parts', { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return dbPromise;
+}
+
+async function dbPutDroppedPart(record) {
+  const db = await openDroppedPartsDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('parts', 'readwrite');
+    tx.objectStore('parts').put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function dbGetAllDroppedParts() {
+  const db = await openDroppedPartsDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('parts', 'readonly');
+    const req = tx.objectStore('parts').getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbDeleteDroppedPart(id) {
+  const db = await openDroppedPartsDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('parts', 'readwrite');
+    tx.objectStore('parts').delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function dbClearDroppedParts() {
+  const db = await openDroppedPartsDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('parts', 'readwrite');
+    tx.objectStore('parts').clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 async function loadSvgForPart(partMeta) {
   const cacheKey = partMeta.id;
   if (svgCache[cacheKey]) return svgCache[cacheKey];
+  
+  // Check for SVG from a dropped file
+  if (droppedPartSvg[partMeta.id]) {
+    svgCache[cacheKey] = droppedPartSvg[partMeta.id];
+    return droppedPartSvg[partMeta.id];
+  }
   
   if (partMeta.type === 'fzp') {
     const ref = partMeta.svg_refs && partMeta.svg_refs.breadboard;
@@ -499,6 +588,8 @@ async function loadPartsDB() {
     computeGroupOrder();
     
     renderPartList();
+    // Load persisted dropped parts from IndexedDB
+    await loadDroppedPartsFromDb();
     document.getElementById('loading').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
     loadStateFromUrl();
@@ -970,11 +1061,22 @@ function hideEmptyState() {
   document.getElementById('emptyState').style.display = 'none';
 }
 
-wrapper.ondragover = (e) => e.preventDefault();
+wrapper.ondragover = (e) => {
+  e.preventDefault();
+  // Show visual drop indicator when dragging files
+  if (Array.from(e.dataTransfer.types).includes('Files')) {
+    wrapper.classList.add('drag-over');
+  }
+};
+wrapper.ondragleave = (e) => {
+  wrapper.classList.remove('drag-over');
+};
 wrapper.ondrop = (e) => {
   e.preventDefault();
+  
+  // Check for sidebar part drag-drop (text/plain payload)
   const partIdx = parseInt(e.dataTransfer.getData('text/plain'));
-  if (isNaN(partIdx)) return;
+  if (!isNaN(partIdx)) {
   const part = partsDB[partIdx];
   if (!part) return;
   
@@ -1035,7 +1137,383 @@ wrapper.ondrop = (e) => {
   updateStatus();
   saveStateToUrl();
   hideEmptyState();
+  return;
+  }
+  
+  // Check for dropped .fzpz files
+  const files = Array.from(e.dataTransfer.files);
+  if (files.length > 0) {
+    for (const file of files) {
+      if (file.name.endsWith('.fzpz')) {
+        handleDroppedFritzingFile(file, e);
+        return;
+      }
+    }
+  }
 };
+
+// ===== DROPPED FRITZING FILES =====
+
+/** Extract connector positions (SVG viewBox coords) from an SVG string.
+ *  Returns a map of { connectorId: {x, y} } for connectors whose
+ *  pin element exists in the SVG. */
+function parseConnectorPositionsFromSvg(svgContent, connectors) {
+  const parser = new DOMParser();
+  const svgDoc = parser.parseFromString(svgContent, 'image/svg+xml');
+  const positions = {};
+  
+  for (const conn of connectors) {
+    const pinEl = svgDoc.getElementById(conn.id + 'pin');
+    if (!pinEl) continue;
+    
+    let cx, cy;
+    const tag = pinEl.tagName.toLowerCase();
+    if (tag === 'rect') {
+      cx = parseFloat(pinEl.getAttribute('x') || 0) + parseFloat(pinEl.getAttribute('width') || 6) / 2;
+      cy = parseFloat(pinEl.getAttribute('y') || 0) + parseFloat(pinEl.getAttribute('height') || 6) / 2;
+    } else if (tag === 'circle') {
+      cx = parseFloat(pinEl.getAttribute('cx') || 0);
+      cy = parseFloat(pinEl.getAttribute('cy') || 0);
+    } else if (tag === 'ellipse') {
+      cx = parseFloat(pinEl.getAttribute('cx') || 0);
+      cy = parseFloat(pinEl.getAttribute('cy') || 0);
+    } else continue;
+    
+    // Apply SVG transform matrix if present
+    const tf = pinEl.getAttribute('transform');
+    if (tf) {
+      const m = tf.match(/matrix\s*\(([^)]+)\)/);
+      if (m) {
+        const parts = m[1].split(',').map(Number);
+        if (parts.length === 6) {
+          const [a, b, c, d, e, f] = parts;
+          const nx = a * cx + c * cy + e;
+          const ny = b * cx + d * cy + f;
+          cx = nx; cy = ny;
+        }
+      }
+    }
+    
+    positions[conn.id] = { x: cx, y: cy };
+  }
+  return positions;
+}
+
+/** Parse bus definitions from a Fritzing FZP XML document. */
+function parseBusesFromFzp(doc) {
+  const buses = [];
+  const busEls = doc.querySelectorAll('bus');
+  busEls.forEach(busEl => {
+    const busId = busEl.getAttribute('id') || '';
+    const members = [];
+    busEl.querySelectorAll('nodeMember').forEach(m => {
+      const cid = m.getAttribute('connectorId');
+      if (cid) members.push(cid);
+    });
+    if (busId && members.length > 0) {
+      buses.push({ id: busId, members });
+    }
+  });
+  // Also try under <buses> namespace
+  if (buses.length === 0) {
+    doc.querySelectorAll('module buses bus, module > buses > bus').forEach(busEl => {
+      const busId = busEl.getAttribute('id') || '';
+      const members = [];
+      busEl.querySelectorAll('nodeMember').forEach(m => {
+        const cid = m.getAttribute('connectorId');
+        if (cid) members.push(cid);
+      });
+      if (busId && members.length > 0) {
+        buses.push({ id: busId, members });
+      }
+    });
+  }
+  return buses;
+}
+
+/** Parse properties from Fritzing FZP XML. */
+function parsePropertiesFromFzp(doc) {
+  const props = {};
+  doc.querySelectorAll('property').forEach(prop => {
+    const name = prop.getAttribute('name');
+    if (name) props[name] = prop.textContent || '';
+  });
+  return props;
+}
+
+/** Parse tags from Fritzing FZP XML. */
+function parseTagsFromFzp(doc) {
+  const tags = [];
+  doc.querySelectorAll('tag').forEach(t => {
+    const text = t.textContent;
+    if (text) tags.push(text.trim());
+  });
+  return tags;
+}
+
+/** Extract the breadboard SVG image path from a Fritzing FZP XML document. */
+function getBreadboardSvgPathFromFzp(doc) {
+  const layers = doc.querySelector('breadboardView layers');
+  return layers ? layers.getAttribute('image') || '' : '';
+}
+
+/** Parse a Fritzing .fzp XML string and extract part metadata.
+ *  Returns { title, moduleId, connectors, buses, properties, tags, svgPath }
+ *  (svgPath is the breadboard SVG path from the fzp). */
+function parseFzpXml(fzpXml) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(fzpXml, 'text/xml');
+  
+  // Get the <module> or root element
+  const module = doc.querySelector('module') || doc.documentElement;
+  if (!module) throw new Error('Not a valid Fritzing .fzp file');
+  
+  const moduleId = module.getAttribute('moduleId') || '';
+  const title = (module.querySelector('title') || {}).textContent || moduleId || 'Unknown';
+  
+  // Parse connectors
+  const connectors = [];
+  module.querySelectorAll('connector').forEach(conn => {
+    const connId = conn.getAttribute('id');
+    if (!connId) return;
+    connectors.push({
+      id: connId,
+      name: conn.getAttribute('name') || connId,
+      type: conn.getAttribute('type') || '',
+      description: (conn.querySelector('description') || {}).textContent || ''
+    });
+  });
+  
+  const buses = parseBusesFromFzp(doc);
+  const properties = parsePropertiesFromFzp(doc);
+  const tags = parseTagsFromFzp(doc);
+  const svgPath = getBreadboardSvgPathFromFzp(doc);
+  
+  return { title, moduleId, connectors, buses, properties, tags, svgPath };
+}
+
+/** Handle a dropped .fzpz file. */
+async function handleDroppedFritzingFile(file, dropEvent) {
+  const rect = wrapper.getBoundingClientRect();
+  const vp = canvasState.viewport;
+  
+  try {
+    await handleFzpzFile(file, dropEvent, rect, vp);
+  } catch (e) {
+    console.error('Failed to load dropped Fritzing file:', e);
+    document.getElementById('statusText').textContent = '❌ Error: ' + e.message;
+    setTimeout(() => updateStatus(), 3000);
+  }
+}
+
+/** Handle a dropped .fzpz file (self-contained zip archive). */
+async function handleFzpzFile(file, dropEvent, rect, vp) {
+  const arrayBuffer = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  
+  // Find the .fzp file inside the archive
+  let fzpEntry = null;
+  let fzpName = '';
+  for (const [name, entry] of Object.entries(zip.files)) {
+    if (name.endsWith('.fzp') && !entry.dir) {
+      fzpEntry = entry;
+      fzpName = name;
+      break;
+    }
+  }
+  if (!fzpEntry) throw new Error('No .fzp file found inside the .fzpz archive');
+  
+  const fzpXml = await fzpEntry.async('string');
+  const meta = parseFzpXml(fzpXml);
+  
+  // Find and load the breadboard SVG from the zip
+  let svgContent = null;
+  const svgFilename = meta.svgPath.split('/').pop();
+  
+  // Try matching by the breadboard SVG filename
+  for (const [name, entry] of Object.entries(zip.files)) {
+    if (name.endsWith('.svg') && !entry.dir) {
+      if (name.endsWith('/' + svgFilename) || name === svgFilename) {
+        svgContent = await entry.async('string');
+        break;
+      }
+    }
+  }
+  
+  // Fallback: any SVG with 'breadboard' in the name
+  if (!svgContent) {
+    for (const [name, entry] of Object.entries(zip.files)) {
+      if (name.endsWith('.svg') && name.includes('breadboard') && !entry.dir) {
+        svgContent = await entry.async('string');
+        break;
+      }
+    }
+  }
+  
+  // Last resort: any SVG at all
+  if (!svgContent) {
+    for (const [name, entry] of Object.entries(zip.files)) {
+      if (name.endsWith('.svg') && !entry.dir) {
+        svgContent = await entry.async('string');
+        break;
+      }
+    }
+  }
+  
+  if (!svgContent) throw new Error('No SVG found in the .fzpz archive');
+  
+  await placeDroppedPart(meta, svgContent, dropEvent, rect, vp, file.name);
+}
+
+/** Register a part from a dropped file and place it on the canvas. */
+async function placeDroppedPart(meta, svgContent, dropEvent, rect, vp, fileName) {
+  // Generate a unique module ID for this dropped part
+  const partId = 'dropped_' + (meta.moduleId || Date.now().toString(36));
+  
+  // Cache the SVG so loadSvgForPart can find it
+  droppedPartSvg[partId] = svgContent;
+  
+  // Compute connector positions from the SVG
+  const connPositions = parseConnectorPositionsFromSvg(svgContent, meta.connectors);
+  
+  // Build part metadata entry; add it to partsDB temporarily
+  const partMeta = {
+    id: partId,
+    type: 'fzpz',  // treat like fzpz (SVG is cached, not fetched)
+    title: meta.title,
+    source: 'dropped',
+    category: 'user',
+    group: 'Dropped Parts',
+    connectors: meta.connectors,
+    connector_positions: connPositions,
+    svg_refs: null,
+    fzpz_file: null,
+    properties: meta.properties,
+    buses: meta.buses,
+    tags: meta.tags,
+    grid_snap_points: [],
+    grid_spacing_svg: null
+  };
+  
+  const idx = partsDB.length;
+  partsDB.push(partMeta);
+  
+  // Persist to IndexedDB
+  dbPutDroppedPart({ id: partId, title: meta.title, svgContent, metadata: partMeta });
+  
+  // Compute drop position (centered under cursor)
+  const rawX = (dropEvent.clientX - rect.left - vp.x) / vp.scale - 50;
+  const rawY = (dropEvent.clientY - rect.top - vp.y) / vp.scale - 25;
+  
+  const id = 'p' + (nextPartId++);
+  const displayScale = getPartDisplayScale(partMeta);
+  const rawState = { partId, x: rawX, y: rawY, displayScale };
+  const snapped = snapWithPart(rawState, rawX, rawY);
+  const newState = { partId, id, x: snapped.x, y: snapped.y, rotation: 0, displayScale };
+  canvasState.parts.push(newState);
+  
+  await renderPart(id);
+  
+  // Check for auto-snap to other parts' connectors
+  const conns = getConnectorWorldPositions(newState);
+  if (conns.length > 0) {
+    for (const otherState of canvasState.parts) {
+      if (otherState.id === newState.id) continue;
+      const otherConns = getConnectorWorldPositions(otherState);
+      if (otherConns.length === 0) continue;
+      
+      let bestDist = Infinity;
+      let bestOffset = null;
+      for (const dc of conns) {
+        for (const oc of otherConns) {
+          const dx = oc.absX - dc.absX;
+          const dy = oc.absY - dc.absY;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestOffset = {dx, dy};
+          }
+        }
+      }
+      
+      if (bestDist < CONNECTOR_SNAP_THRESHOLD && bestOffset) {
+        newState.x = newState.x + bestOffset.dx;
+        newState.y = newState.y + bestOffset.dy;
+        const div = document.getElementById('cp-' + id);
+        if (div) {
+          div.style.left = newState.x + 'px';
+          div.style.top = newState.y + 'px';
+        }
+        const wireCount = autoConnectMatedConnectors(newState.id, otherState.id, newState, otherState);
+        if (wireCount > 0) {
+          renderWires();
+        }
+      }
+    }
+  }
+  
+  updateStatus();
+  saveStateToUrl();
+  hideEmptyState();
+  document.getElementById('statusText').textContent = '✅ Dropped "' + meta.title + '" from ' + fileName + '';
+  setTimeout(() => updateStatus(), 3000);
+}
+
+/** Remove all dropped part entries from partsDB and clear the SVG cache. */
+function cleanupDroppedParts() {
+  // Remove entries whose ids start with 'dropped_'
+  const origLen = partsDB.length;
+  partsDB = partsDB.filter(p => !p.id || !p.id.startsWith('dropped_'));
+  // Also clear the dropped SVG cache
+  for (const key of Object.keys(droppedPartSvg)) {
+    delete svgCache[key];
+  }
+  for (const key of Object.keys(droppedPartSvg)) {
+    delete droppedPartSvg[key];
+  }
+  // Clear from IndexedDB
+  dbClearDroppedParts();
+}
+
+/** Remove a single dropped part entry from partsDB if it was a dropped part. */
+function cleanupSingleDroppedPart(partId) {
+  // The partId is like 'p1' but the DB entry has partId like 'dropped_xxx'.
+  // Find the state to get its partId.
+  const state = canvasState.parts.find(p => p.id === partId);
+  if (!state) return;
+  const dbId = state.partId;
+  if (!dbId || !dbId.startsWith('dropped_')) return;
+  partsDB = partsDB.filter(p => p.id !== dbId);
+  delete svgCache[dbId];
+  delete droppedPartSvg[dbId];
+  dbDeleteDroppedPart(dbId);
+}
+
+/** Load all persisted dropped parts from IndexedDB and re-register them.
+ *  Called once at startup after parts_index.json is loaded. */
+async function loadDroppedPartsFromDb() {
+  let records;
+  try {
+    records = await dbGetAllDroppedParts();
+  } catch (e) {
+    console.warn('Failed to load dropped parts from IndexedDB:', e);
+    return;
+  }
+  if (!records || records.length === 0) return;
+  
+  for (const record of records) {
+    const partId = record.id;
+    if (!partId || findPartInDB(partId)) continue; // already registered
+    
+    // Restore SVG cache
+    droppedPartSvg[partId] = record.svgContent;
+    
+    // Restore partsDB entry
+    partsDB.push(record.metadata);
+  }
+  
+  console.log('Restored ' + records.length + ' dropped part(s) from IndexedDB');
+}
 
 async function renderPart(partId) {
   const state = canvasState.parts.find(p => p.id === partId);
@@ -2244,6 +2722,8 @@ function clearAll() {
   container.innerHTML = '';
   wiresSvg.innerHTML = '';
   document.getElementById('emptyState').style.display = '';
+  // Clean up dropped part data from partsDB
+  cleanupDroppedParts();
   updateWireSelectionToolbar();
   updateStatus();
   window.location.hash = '';
@@ -2291,6 +2771,8 @@ function deletePart(partId) {
   const el = document.getElementById('cp-' + partId);
   if (el) el.remove();
   document.getElementById('wireCurveHandle')?.remove();
+  // Clean up dropped part data from partsDB if this was a dropped part
+  cleanupSingleDroppedPart(partId);
   renderWires();
   updateStatus();
   saveStateToUrl();
