@@ -253,46 +253,230 @@ def singleton_to_broad(original, part):
     
     return 'Other / Misc'
 
+def _apply_transform(pos, transform_str):
+    """Apply an SVG transform matrix to a (x, y) position.
+    Returns transformed (x, y). Supports matrix(a,b,c,d,e,f) only.
+    """
+    if not transform_str:
+        return pos
+    m = re.search(r'matrix\s*\(([^)]+)\)', transform_str)
+    if not m:
+        return pos
+    # Split on commas or whitespace
+    parts = re.split(r'[\s,]+', m.group(1).strip())
+    parts = [float(x) for x in parts if x]
+    if len(parts) != 6:
+        return pos
+    a, b, c, d, e, f = parts
+    x, y = pos
+    return (a * x + c * y + e, b * x + d * y + f)
+
+
+def get_grid_spacing_svg(svg_content):
+    """Return SVG units per 0.1" grid cell, following Fritzing's convention.
+    Fritzing computes DPI = viewBox_width / physical_width,
+    then grid_spacing = DPI / 10 (SVG units per 0.1").
+    Handles width in inches ("in") or millimeters ("mm").
+    Returns None when metadata is unavailable."""
+    w_match = re.search(r'width="([\d.]+)in"', svg_content)
+    w_mm_match = re.search(r'width="([\d.]+)mm"', svg_content)
+    vb_match = re.search(r'viewBox="[\d.]+ [\d.]+ ([\d.]+) ([\d.]+)"', svg_content)
+    if not vb_match:
+        return None
+    vb_w = float(vb_match.group(1))
+    if w_match:
+        phys_inches = float(w_match.group(1))
+    elif w_mm_match:
+        phys_inches = float(w_mm_match.group(1)) / 25.4
+    else:
+        return None
+    dpi = vb_w / phys_inches
+    return dpi / 10  # SVG units per 0.1"
+
+
+def compute_grid_spacing_from_connectors(connector_positions):
+    """Infer SVG units per 0.1" grid cell from connector positions.
+    Finds the most common gap between adjacent connectors in the same row/column.
+    Rounds positions to 4 decimal places to handle floating-point noise.
+    Returns None when insufficient data."""
+    positions = list(connector_positions.values())
+    if len(positions) < 3:
+        return None
+
+    # Round coordinates to 4 decimal places to eliminate SVG float noise
+    rounded = [{'x': round(pt['x'], 4), 'y': round(pt['y'], 4)} for pt in positions]
+
+    # Group by Y (rounded to 1 decimal), find the row with most connectors
+    from collections import defaultdict
+    rows = defaultdict(list)
+    for pt in rounded:
+        ry = round(pt['y'], 1)
+        rows[ry].append(pt['x'])
+
+    best_row = max(rows.values(), key=lambda r: len(r))
+    best_row.sort()
+
+    if len(best_row) < 3:
+        # Try columns instead
+        cols = defaultdict(list)
+        for pt in rounded:
+            rx = round(pt['x'], 1)
+            cols[rx].append(pt['y'])
+        best_col = max(cols.values(), key=lambda r: len(r))
+        best_col.sort()
+        if len(best_col) < 3:
+            return None
+        gaps = [round(best_col[i + 1] - best_col[i], 2) for i in range(len(best_col) - 1)]
+    else:
+        gaps = [round(best_row[i + 1] - best_row[i], 2) for i in range(len(best_row) - 1)]
+
+    if not gaps:
+        return None
+    # Find the most common gap
+    from collections import Counter
+    gap_counts = Counter(gaps)
+    most_common_gap, count = gap_counts.most_common(1)[0]
+    # Ensure it's a reasonable grid spacing (between 5 and 15 SVG units for 0.1")
+    # Fritzing standard is 7.2 (72 DPI), Adafruit uses 9.0 (90 DPI), etc.
+    if 4 < most_common_gap < 20:
+        return most_common_gap
+    return None
+
+
+def compute_grid_snap_points(connectors, connector_positions, raw_positions=None, grid_spacing_svg=None):
+    """For each connector, find all others that are grid-congruent (spacing a
+    multiple of 0.1" grid cell). Uses raw (untransformed) positions when
+    available, transformed positions otherwise.
+    Returns a list of snap points, each as:
+    {"anchor": connectorId, "onGrid": [connectorId, ...]}.
+    Deduplicates by remainder to avoid identical alignments from different anchors."""
+    if grid_spacing_svg is None or grid_spacing_svg <= 0:
+        # Try to infer from connector positions
+        inferred = compute_grid_spacing_from_connectors(connector_positions)
+        if inferred:
+            G = inferred
+        else:
+            # Default to 100 DPI (standard Fritzing convention) when unknown
+            G = 10.0
+    else:
+        G = float(grid_spacing_svg)
+    EPS = 0.02
+    ids = [c['id'] for c in connectors]
+    # Use transformed positions for grid check (they account for SVG transforms).
+    # Raw positions are pre-transform and may be at a different scale.
+    check_positions = connector_positions
+    seen = set()
+    points = []
+    for i, aid in enumerate(ids):
+        a = check_positions.get(aid)
+        if not a:
+            continue
+        on_grid = [aid]
+        has_pair = False
+        for bid in ids:
+            if bid == aid:
+                continue
+            b = check_positions.get(bid)
+            if not b:
+                continue
+            dx = b['x'] - a['x']
+            dy = b['y'] - a['y']
+            # Require non-zero spacing (ignore coincident connectors or same pos)
+            if abs(dx) < EPS and abs(dy) < EPS:
+                continue
+            # Round to avoid floating-point noise (e.g. 8.9999998 instead of 9.0)
+            dx = round(dx, 4)
+            dy = round(dy, 4)
+            if abs(dx % G) < EPS and abs(dy % G) < EPS:
+                has_pair = True
+                if bid not in on_grid:
+                    on_grid.append(bid)
+        if not has_pair:
+            continue
+        # Deduplicate by remainder (rounded to avoid float noise)
+        rem_x = round((-a['x']) % G, 4)
+        rem_y = round((-a['y']) % G, 4)
+        key = f'{rem_x},{rem_y}'
+        if key in seen:
+            continue
+        seen.add(key)
+        points.append({'anchor': aid, 'onGrid': on_grid})
+    return points
+
+
 def extract_svg_connector_positions(svg_content):
     """Parse SVG content and extract connector pin positions.
-    Returns a dict mapping connector_id -> {x, y} in SVG coordinates.
-    Connector pins are SVG elements with id="connectorNNNpin".
-    """
+    Returns (positions, raw_positions) where positions have transforms applied
+    and raw_positions have only the raw SVG coordinates (before transform).
+    Both are dicts mapping connector_id -> {x, y} in SVG coordinates.
+    Connector pins are SVG elements with id="connectorNNNpin"."""
     positions = {}
+    raw_positions = {}
     
-    # Find rect elements with connector id - use loose attribute order matching
+    # Match connector IDs with optional letters then digits: connectorA1pin, connectorZ30pin
+    conn_id_re = r'connector([A-Za-z]?\d+)pin'
+    
+    # Find rect elements with connector id
     for match in re.finditer(
-        r'<rect\s[^>]*id="(connector\d+pin)"[^>]*>',
+        r'<rect\s[^>]*id="(' + conn_id_re + r')"[^>]*>',
         svg_content
     ):
         element = match.group(0)
-        cid = match.group(1).replace('pin', '')
+        full_id = match.group(1)
+        cid = full_id.replace('pin', '')
         x_match = re.search(r'x="([\d.]+)"', element)
         y_match = re.search(r'y="([\d.]+)"', element)
         w_match = re.search(r'width="([\d.]+)"', element)
         h_match = re.search(r'height="([\d.]+)"', element)
+        t_match = re.search(r'transform="([^"]+)"', element)
         if x_match and y_match:
             x = float(x_match.group(1))
             y = float(y_match.group(1))
             w = float(w_match.group(1)) / 2 if w_match else 0
             h = float(h_match.group(1)) / 2 if h_match else 0
-            positions[cid] = {'x': x + w, 'y': y + h}
+            cx = x + w
+            cy = y + h
+            raw_positions[cid] = {'x': cx, 'y': cy}
+            px, py = _apply_transform((cx, cy), t_match.group(1) if t_match else '')
+            positions[cid] = {'x': px, 'y': py}
     
     # Find circle elements with connector id
     for match in re.finditer(
-        r'<circle\s[^>]*id="(connector\d+pin)"[^>]*>',
+        r'<circle\s[^>]*id="(' + conn_id_re + r')"[^>]*>',
         svg_content
     ):
         element = match.group(0)
-        cid = match.group(1).replace('pin', '')
+        full_id = match.group(1)
+        cid = full_id.replace('pin', '')
         cx_match = re.search(r'cx="([\d.]+)"', element)
         cy_match = re.search(r'cy="([\d.]+)"', element)
+        t_match = re.search(r'transform="([^"]+)"', element)
         if cx_match and cy_match:
-            x = float(cx_match.group(1))
-            y = float(cy_match.group(1))
-            positions[cid] = {'x': x, 'y': y}
+            cx = float(cx_match.group(1))
+            cy = float(cy_match.group(1))
+            raw_positions[cid] = {'x': cx, 'y': cy}
+            px, py = _apply_transform((cx, cy), t_match.group(1) if t_match else '')
+            positions[cid] = {'x': px, 'y': py}
     
-    return positions
+    # Find ellipse elements with connector id
+    for match in re.finditer(
+        r'<ellipse\s[^>]*id="(' + conn_id_re + r')"[^>]*>',
+        svg_content
+    ):
+        element = match.group(0)
+        full_id = match.group(1)
+        cid = full_id.replace('pin', '')
+        cx_match = re.search(r'cx="([\d.]+)"', element)
+        cy_match = re.search(r'cy="([\d.]+)"', element)
+        t_match = re.search(r'transform="([^"]+)"', element)
+        if cx_match and cy_match:
+            cx = float(cx_match.group(1))
+            cy = float(cy_match.group(1))
+            raw_positions[cid] = {'x': cx, 'y': cy}
+            px, py = _apply_transform((cx, cy), t_match.group(1) if t_match else '')
+            positions[cid] = {'x': px, 'y': py}
+    
+    return positions, raw_positions
 
 
 def parse_fzp(fzp_path, source, category):
@@ -333,6 +517,8 @@ def parse_fzp(fzp_path, source, category):
         tax = root.findtext(f'{ns}taxonomy', '')
         
         conn_positions = {}
+        raw_conn_positions = {}
+        grid_spacing = None
         breadboard_ref = svg_refs.get('breadboard', '')
         if breadboard_ref:
             svg_path = os.path.join(BASE, 'fritzing-parts', 'svg', category, breadboard_ref)
@@ -340,9 +526,14 @@ def parse_fzp(fzp_path, source, category):
                 try:
                     with open(svg_path, 'r') as f:
                         svg_content = f.read()
-                    conn_positions = extract_svg_connector_positions(svg_content)
+                    conn_positions, raw_conn_positions = extract_svg_connector_positions(svg_content)
+                    grid_spacing = get_grid_spacing_svg(svg_content)
                 except Exception as e:
                     print(f"    SVG pos error {svg_path}: {e}")
+        
+        # If no SVG-derived grid spacing, try from connector positions
+        if grid_spacing is None:
+            grid_spacing = compute_grid_spacing_from_connectors(conn_positions)
         
         result = {
             'id': module_id or hashlib.md5(fzp_path.encode()).hexdigest()[:12],
@@ -354,6 +545,9 @@ def parse_fzp(fzp_path, source, category):
             'svg_refs': svg_refs,
             'connectors': connectors,
             'connector_positions': conn_positions,
+            'raw_connector_positions': raw_conn_positions,
+            'grid_snap_points': compute_grid_snap_points(connectors, conn_positions, raw_conn_positions, grid_spacing),
+            'grid_spacing_svg': grid_spacing,
             'tags': tags,
             'properties': props,
             'taxonomy': tax,
@@ -399,6 +593,8 @@ def parse_fzpz(fzpz_path, source, category):
             svg_files = [n for n in zf.namelist() if n.endswith('.svg')]
             
             conn_positions = {}
+            raw_conn_positions = {}
+            grid_spacing = None
             breadboard_ref = svg_refs.get('breadboard', '')
             if breadboard_ref:
                 bb_filename = breadboard_ref.split('/')[-1]
@@ -406,7 +602,8 @@ def parse_fzpz(fzpz_path, source, category):
                     if svg_name.endswith(bb_filename) or ('breadboard' in svg_name):
                         try:
                             svg_content = zf.read(svg_name).decode('utf-8')
-                            conn_positions = extract_svg_connector_positions(svg_content)
+                            conn_positions, raw_conn_positions = extract_svg_connector_positions(svg_content)
+                            grid_spacing = get_grid_spacing_svg(svg_content)
                             if conn_positions:
                                 break
                         except:
@@ -417,11 +614,16 @@ def parse_fzpz(fzpz_path, source, category):
                     if 'breadboard' in svg_name:
                         try:
                             svg_content = zf.read(svg_name).decode('utf-8')
-                            conn_positions = extract_svg_connector_positions(svg_content)
+                            conn_positions, raw_conn_positions = extract_svg_connector_positions(svg_content)
+                            grid_spacing = get_grid_spacing_svg(svg_content)
                             if conn_positions:
                                 break
                         except:
                             pass
+            
+            # If no SVG-derived grid spacing, try from connector positions
+            if grid_spacing is None:
+                grid_spacing = compute_grid_spacing_from_connectors(conn_positions)
             
             result = {
                 'id': module_id or hashlib.md5(fzpz_path.encode()).hexdigest()[:12],
@@ -434,6 +636,9 @@ def parse_fzpz(fzpz_path, source, category):
                 'svg_files': svg_files,
                 'connectors': connectors,
                 'connector_positions': conn_positions,
+                'raw_connector_positions': raw_conn_positions,
+                'grid_snap_points': compute_grid_snap_points(connectors, conn_positions, raw_conn_positions, grid_spacing),
+                'grid_spacing_svg': grid_spacing,
                 'tags': tags,
                 'properties': {},
                 'taxonomy': '',
