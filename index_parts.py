@@ -479,6 +479,23 @@ def extract_svg_connector_positions(svg_content):
     return positions, raw_positions
 
 
+def extract_buses(root, ns):
+    """Parse the <buses> element from a Fritzing .fzp file.
+    Returns a list of {"id": bus_id, "members": [connector_id, ...]}.
+    Returns empty list when no buses exist."""
+    buses = []
+    for bus_elem in root.findall(f'{ns}buses/{ns}bus'):
+        bus_id = bus_elem.get('id', '')
+        members = []
+        for member in bus_elem.findall(f'{ns}nodeMember'):
+            cid = member.get('connectorId', '')
+            if cid:
+                members.append(cid)
+        if bus_id and members:
+            buses.append({'id': bus_id, 'members': members})
+    return buses
+
+
 def parse_fzp(fzp_path, source, category):
     """Parse a .fzp file from fritzing-parts."""
     try:
@@ -497,11 +514,18 @@ def parse_fzp(fzp_path, source, category):
         
         tags = [t.text for t in root.findall(f'{ns}tags/{ns}tag') if t.text]
         
+        buses = extract_buses(root, ns)
+        
         connectors = []
         for conn in root.findall(f'{ns}connectors/{ns}connector'):
             cid = conn.get('id', '')
-            cname = conn.findtext(f'{ns}name', '')
-            connectors.append({'id': cid, 'name': cname})
+            cname = conn.get('name', '')
+            connectors.append({
+                'id': cid,
+                'name': cname,
+                'type': conn.get('type', ''),
+                'description': conn.findtext(f'{ns}description', ''),
+            })
         
         # SVG references from views
         svg_refs = {}
@@ -543,6 +567,7 @@ def parse_fzp(fzp_path, source, category):
             'type': 'fzp',
             'fzp_file': os.path.relpath(fzp_path, BASE),
             'svg_refs': svg_refs,
+            'buses': buses,
             'connectors': connectors,
             'connector_positions': conn_positions,
             'raw_connector_positions': raw_conn_positions,
@@ -575,10 +600,17 @@ def parse_fzpz(fzpz_path, source, category):
             connectors = []
             for conn in root.findall(f'{ns}connectors/{ns}connector'):
                 cid = conn.get('id', '')
-                cname = conn.findtext(f'{ns}name', '')
-                connectors.append({'id': cid, 'name': cname})
+                cname = conn.get('name', '')
+                connectors.append({
+                    'id': cid,
+                    'name': cname,
+                    'type': conn.get('type', ''),
+                    'description': conn.findtext(f'{ns}description', ''),
+                })
             
             tags = [t.text for t in root.findall(f'{ns}tags/{ns}tag') if t.text]
+            
+            buses = extract_buses(root, ns)
             
             svg_refs = {}
             for view_name in ['iconView', 'breadboardView', 'schematicView', 'pcbView']:
@@ -634,6 +666,7 @@ def parse_fzpz(fzpz_path, source, category):
                 'fzpz_file': os.path.relpath(fzpz_path, BASE),
                 'svg_refs': svg_refs,
                 'svg_files': svg_files,
+                'buses': buses,
                 'connectors': connectors,
                 'connector_positions': conn_positions,
                 'raw_connector_positions': raw_conn_positions,
@@ -674,6 +707,18 @@ if os.path.isdir(ada_dir):
                 p = parse_fzpz(fp, 'adafruit', 'parts')
                 if p:
                     parts.append(p)
+
+# Deduplicate IDs: append _1, _2, etc. when moduleId collisions occur
+id_counts = {}
+for p in parts:
+    pid = p['id']
+    id_counts[pid] = id_counts.get(pid, 0) + 1
+seen_ids = {}
+for p in parts:
+    pid = p['id']
+    if id_counts[pid] > 1:
+        seen_ids[pid] = seen_ids.get(pid, 0) + 1
+        p['id'] = f"{pid}___{seen_ids[pid]}"
 
 print(f"Indexed {len(parts)} parts")
 group_counts = assign_groups(parts)

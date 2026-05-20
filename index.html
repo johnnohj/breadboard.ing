@@ -1915,9 +1915,31 @@ function buildWireAdjacency() {
   return adj;
 }
 
-/** BFS from a connector to find all connectors on the same net. */
+/** BFS from a connector to find all connectors on the same net.
+ * Combines wire connections with internal part bus connections. */
 function getNetConnectors(partId, connectorId) {
   const adj = buildWireAdjacency();
+  
+  // Add internal bus connections for each placed part
+  for (const ps of canvasState.parts) {
+    const part = findPartInDB(ps.partId);
+    if (part && part.buses) {
+      for (const bus of part.buses) {
+        const members = bus.members || [];
+        for (let i = 0; i < members.length; i++) {
+          for (let j = i + 1; j < members.length; j++) {
+            const a = ps.id + ':' + members[i];
+            const b = ps.id + ':' + members[j];
+            if (!adj[a]) adj[a] = [];
+            if (!adj[b]) adj[b] = [];
+            adj[a].push(b);
+            adj[b].push(a);
+          }
+        }
+      }
+    }
+  }
+  
   const start = partId + ':' + connectorId;
   const visited = new Set([start]);
   const queue = [start];
@@ -1955,12 +1977,34 @@ function showConnectorLabel(partId, connectorId, name, pinEl) {
   const pinRect = pinEl.getBoundingClientRect();
   const wrapperRect = wrapper.getBoundingClientRect();
   
+  // Look up connector description and bus info from the part DB
+  const partState = canvasState.parts.find(p => p.id === partId);
+  const part = partState ? findPartInDB(partState.partId) : null;
+  const connInfo = part ? (part.connectors || []).find(c => c.id === connectorId) : null;
+  const connName = connInfo ? (connInfo.name || connInfo.description || '') : '';
+  const connDesc = connInfo && connInfo.description && connInfo.description !== connInfo.name ? connInfo.description : '';
+  
+  // Find which bus this connector belongs to, if any
+  let busId = '';
+  if (part && part.buses) {
+    for (const bus of part.buses) {
+      if (bus.members.includes(connectorId)) {
+        busId = bus.id;
+        break;
+      }
+    }
+  }
+  
+  let labelText = connName || connectorId;
+  if (busId) labelText += '  [' + busId + ']';
+  if (connDesc) labelText += ' — ' + connDesc;
+  
   // Position label above and to the right of the connector pin
   let lx = pinRect.left - wrapperRect.left + pinRect.width + 6;
   let ly = pinRect.top - wrapperRect.top - 8;
   
   // Keep label within wrapper bounds
-  const labelW = 200;
+  const labelW = 280;
   const labelH = 30;
   if (lx + labelW > wrapper.clientWidth) {
     lx = pinRect.left - wrapperRect.left - labelW - 6;
@@ -1968,7 +2012,7 @@ function showConnectorLabel(partId, connectorId, name, pinEl) {
   if (ly < 0) ly = 2;
   if (ly + labelH > wrapper.clientHeight) ly = wrapper.clientHeight - labelH - 2;
   
-  label.textContent = name;
+  label.textContent = labelText;
   label.style.left = lx + 'px';
   label.style.top = ly + 'px';
   label.classList.add('visible');
