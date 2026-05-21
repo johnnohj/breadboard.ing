@@ -33,6 +33,79 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
 .tab .count { font-size: 10px; color: #666; margin-left: 4px; }
 
 .part-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+
+/* Wire list panel at bottom of sidebar */
+.wire-list-panel {
+  border-top: 1px solid #3c3c3c;
+  background: #2d2d2d;
+  flex-shrink: 0;
+  max-height: 250px;
+  display: flex;
+  flex-direction: column;
+}
+.wire-list-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; cursor: pointer; user-select: none;
+  font-size: 12px; color: #aaa; font-weight: 600;
+  transition: background 0.1s;
+}
+.wire-list-header:hover { background: #333; }
+.wire-list-header .arrow {
+  font-size: 10px; transition: transform 0.15s; color: #666;
+}
+.wire-list-header .arrow.expanded { transform: rotate(90deg); }
+.wire-list-body {
+  overflow-y: auto; flex: 1;
+}
+.wire-list-body::-webkit-scrollbar { width: 5px; }
+.wire-list-body::-webkit-scrollbar-thumb { background: #555; border-radius: 2px; }
+/* Wire tree view */
+.wire-tree-group { border-bottom: 1px solid #2a2a2a; }
+.wire-tree-header {
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 8px; cursor: pointer; user-select: none;
+  font-size: 11px; color: #ccc; transition: background 0.1s;
+}
+.wire-tree-header:hover { background: #333; }
+.wire-tree-header .arrow {
+  font-size: 8px; width: 12px; text-align: center;
+  transition: transform 0.15s; color: #666; flex-shrink: 0;
+}
+.wire-tree-header .arrow.expanded { transform: rotate(90deg); }
+.wire-tree-header .wire-tree-from { color: #ddd; font-weight: 500; }
+.wire-tree-header .wire-tree-arrow { color: #555; margin: 0 3px; }
+.wire-tree-header .wire-tree-to { color: #ddd; font-weight: 500; }
+.wire-tree-header .wire-tree-count {
+  margin-left: auto; font-size: 10px; color: #666;
+}
+.wire-tree-children { padding: 0; }
+.wire-tree-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 8px 3px 24px; font-size: 11px; color: #999;
+  cursor: pointer; transition: background 0.1s;
+}
+.wire-tree-item:hover { background: #3a3a3a; color: #ccc; }
+.wire-tree-item .wire-color-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.wire-tree-item .wire-conn-from { color: #aaa; }
+.wire-tree-item .wire-conn-arrow { color: #555; margin: 0 3px; }
+.wire-tree-item .wire-conn-to { color: #aaa; }
+.wire-list-footer {
+  padding: 6px 8px; border-top: 1px solid #3c3c3c;
+}
+.wire-list-footer button {
+  width: 100%; padding: 5px; border: 1px solid #555;
+  border-radius: 4px; background: transparent; color: #aaa;
+  cursor: pointer; font-size: 11px; transition: all 0.15s;
+}
+.wire-list-footer button:hover {
+  background: #0078d4; border-color: #0078d4; color: #fff;
+}
+.wire-list-empty {
+  padding: 12px; text-align: center; font-size: 11px; color: #555;
+}
 .part-list::-webkit-scrollbar { width: 6px; }
 .part-list::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
 
@@ -113,6 +186,8 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
   pointer-events: none; z-index: 0;
 }
 
+#partsContainer { position: absolute; top: 0; left: 0; z-index: 60; }
+
 .canvas-part {
   position: absolute; cursor: move; z-index: 1; user-select: none;
   touch-action: none;
@@ -191,6 +266,7 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
 .wire-selectable { cursor: pointer; }
 .wire-selectable:hover { opacity: 0.85; }
 .wire-selected { stroke: #4fc3f7 !important; stroke-width: 3.5 !important; }
+.wire-hovered { stroke-width: 3.5 !important; opacity: 0.85; }
 
 /* Wire curve handle */
 .wire-curve-handle {
@@ -271,6 +347,17 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
   box-shadow: 0 3px 12px rgba(0,0,0,0.6);
 }
 .connector-label.visible { display: block; }
+
+/* Debug overlay visibility */
+.debug-hidden .connector-pin {
+  background: transparent;
+  border-color: transparent;
+}
+.debug-hidden .part-origin-marker,
+.debug-hidden .snap-anchor-marker {
+  display: none !important;
+}
+
 @keyframes pulse {
   0%, 100% { transform: scale(1); opacity: 0.6; }
   50% { transform: scale(1.5); opacity: 1; }
@@ -292,6 +379,30 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
 }
 .empty-state h2 { font-size: 24px; margin-bottom: 8px; }
 .empty-state p { font-size: 14px; }
+
+.search-results-info {
+  padding: 20px;
+  text-align: center;
+  color: #888;
+}
+.search-results-info .count {
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+.search-results-info button {
+  padding: 8px 16px;
+  border: 1px solid #0078d4;
+  border-radius: 6px;
+  background: transparent;
+  color: #0078d4;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+.search-results-info button:hover {
+  background: #0078d4;
+  color: #fff;
+}
 
 /* Drop zone highlight when dragging files over the canvas */
 .canvas-wrapper.drag-over::after {
@@ -354,6 +465,19 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
       </div>
     </div>
     <div class="part-list" id="partList"></div>
+    <div class="wire-list-panel" id="wireListPanel">
+      <div class="wire-list-header" onclick="toggleWireList()">
+        <span>🔌 Wires (<span id="wireCountDisplay">0</span>)</span>
+        <span class="arrow expanded" id="wireListArrow">▶</span>
+      </div>
+      <div class="wire-list-body" id="wireListBody">
+        <div class="wire-list-empty" id="wireListEmpty">No wires yet</div>
+        <div id="wireListItems"></div>
+        <div class="wire-list-footer">
+          <button onclick="copyWiresAsJson()">📋 Copy as JSON</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="canvas-container">
@@ -373,6 +497,7 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
     <div class="canvas-toolbar">
       <button onclick="clearAll()" class="danger">🗑️ Clear</button>
       <button onclick="copyShareLink()">🔗 Share</button>
+      <button id="debugBtn" onclick="toggleDebug()" title="Toggle debug overlay" class="active">🐛</button>
     </div>
 
     <div class="canvas-wrapper" id="canvasWrapper">
@@ -385,7 +510,7 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
       <div class="wires-overlay" id="wiresOverlay">
         <svg id="wiresSvg"></svg>
       </div>
-      <div id="partsContainer"></div>
+      <div id="partsContainer">
       <div class="selection-toolbar" id="selectionToolbar">
         <!-- Part actions -->
         <span class="part-actions" id="partActions">
@@ -410,6 +535,7 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
           <span class="sep"></span>
           <button onclick="resetWireCurve()" title="Reset curve">↩️</button>
         </span>
+      </div>
       </div>
       <div class="connector-label" id="connectorLabel"></div>
       <svg class="wire-drawing-line" id="wireDrawingLine" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:60">
@@ -587,12 +713,7 @@ async function loadPartsDB() {
     const resp = await fetch('parts_index.json');
     partsDB = await resp.json();
     
-    document.getElementById('count-fritzing-core').textContent = 
-      partsDB.filter(p => p.source === 'fritzing' && p.category === 'core').length;
-    document.getElementById('count-fritzing-contrib').textContent = 
-      partsDB.filter(p => p.source === 'fritzing' && p.category === 'contrib').length;
-    document.getElementById('count-adafruit').textContent = 
-      partsDB.filter(p => p.source === 'adafruit').length;
+    updateTabCounts();
     
     // Compute group order (by count descending, then alphabetically)
     computeGroupOrder();
@@ -624,14 +745,38 @@ function computeGroupOrder() {
 
 // ===== SIDEBAR =====
 let currentTab = 'fritzing-core';
+let searchLoadAll = false;
+
+function updateTabCounts() {
+  const q = (document.getElementById('search').value || '').toLowerCase().trim();
+  
+  function matches(p) {
+    if (!q) return true;
+    return p.title.toLowerCase().includes(q) ||
+      (p.group || '').toLowerCase().includes(q) ||
+      (p.tags || []).some(t => t.toLowerCase().includes(q)) ||
+      Object.values(p.properties || {}).some(v => typeof v === 'string' && v.toLowerCase().includes(q));
+  }
+  
+  const coreCount = partsDB.filter(p => p.source === 'fritzing' && p.category === 'core' && matches(p)).length;
+  const contribCount = partsDB.filter(p => p.source === 'fritzing' && p.category === 'contrib' && matches(p)).length;
+  const adaCount = partsDB.filter(p => p.source === 'adafruit' && matches(p)).length;
+  
+  document.getElementById('count-fritzing-core').textContent = coreCount ? coreCount : '';
+  document.getElementById('count-fritzing-contrib').textContent = contribCount ? contribCount : '';
+  document.getElementById('count-adafruit').textContent = adaCount ? adaCount : '';
+}
 
 function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  updateTabCounts();
   renderPartList();
 }
 
 function filterParts() {
+  searchLoadAll = false;
+  updateTabCounts();
   renderPartList();
 }
 
@@ -650,6 +795,11 @@ function getFilteredParts() {
     );
   }
   return filtered;
+}
+
+function loadAllSearchResults() {
+  searchLoadAll = true;
+  renderPartList();
 }
 
 function groupParts(parts) {
@@ -693,6 +843,16 @@ function renderPartList() {
   const isSearching = q.length > 0;
   
   if (isSearching) {
+    if (parts.length > 50 && !searchLoadAll) {
+      const info = document.createElement('div');
+      info.className = 'search-results-info';
+      info.innerHTML = `
+        <div class="count">Found ${parts.length} results</div>
+        <button onclick="loadAllSearchResults()">Load all</button>
+      `;
+      container.appendChild(info);
+      return;
+    }
     // Flat list when searching — sorted alphabetically
     parts.sort((a, b) => a.title.localeCompare(b.title)).forEach((p) => {
       const div = createPartItem(p);
@@ -834,6 +994,7 @@ let canvasState = {
 let nextPartId = 1;
 let nextWireId = 1;
 let selectedWire = null; // wire ID string
+let highlightedWire = null; // wire ID string for hover highlight
 let wireDrawing = null;
 let wireCurveDragging = null; // for the curve handle drag
 
@@ -848,17 +1009,49 @@ function snap(v) {
   return Math.round(v / GRID_PX) * GRID_PX;
 }
 
+/** Compute raw grid snap groups from connector positions.
+ * Connectors whose pixel positions share the same remainder modulo GRID_PX
+ * can all land on the display grid simultaneously.
+ * Returns an array of { anchor, onGrid } where onGrid is all connector IDs
+ * in that congruence class. */
+function computeGridSnapPoints(part, displayScale) {
+  const pos = part.connector_positions || {};
+  const knownIds = new Set((part.connectors || []).map(c => c.id));
+  const groups = new Map(); // key -> { connectors: [] }
+
+  for (const cid of Object.keys(pos)) {
+    if (!knownIds.has(cid)) continue;
+    const p = pos[cid];
+    const remXPx = ((-p.x * displayScale) % GRID_PX + GRID_PX) % GRID_PX;
+    const remYPx = ((-p.y * displayScale) % GRID_PX + GRID_PX) % GRID_PX;
+    // Round to nearest whole pixel to absorb float imprecision from SVG transforms
+    const key = `${Math.round(remXPx)},${Math.round(remYPx)}`;
+    if (!groups.has(key)) {
+      groups.set(key, { connectors: [] });
+    }
+    groups.get(key).connectors.push(cid);
+  }
+
+  const snapPoints = [];
+  for (const group of groups.values()) {
+    if (group.connectors.length > 0) {
+      snapPoints.push({ anchor: group.connectors[0], onGrid: group.connectors });
+    }
+  }
+  return snapPoints;
+}
+
 /** For a part, compute valid grid snapping points from its connector positions.
- * A snapping point is established when a pair of connectors are spaced
- * by a multiple of 0.1" (10 SVG units). At that alignment, all connectors
- * whose SVG coordinates are grid-congruent with the anchor also land on the grid.
+ * Falls back to dynamic computation when grid_snap_points is empty.
  * Returns an array of { remXPx, remYPx, anchorConnectorId, onGridConnectorIds }. */
 function computePartSnapPoints(part, displayScale) {
-  // Read pre-computed from parts_index.json, convert SVG remainders to pixels
-  const raw = part.grid_snap_points || [];
+  let snapPoints = part.grid_snap_points || [];
+  if (snapPoints.length === 0) {
+    snapPoints = computeGridSnapPoints(part, displayScale);
+  }
   const pos = part.connector_positions || {};
   const points = [];
-  for (const sp of raw) {
+  for (const sp of snapPoints) {
     const a = pos[sp.anchor];
     if (!a) continue;
     const remXPx = ((-a.x * displayScale) % GRID_PX + GRID_PX) % GRID_PX;
@@ -919,11 +1112,15 @@ function getConnectorWorldPositions(partState) {
   const cos = Math.cos(rot);
   const sin = Math.sin(rot);
   
-  // Part center in pixel coords (relative to top-left)
+  // SVG dimensions and viewBox offset
   const svgW = partState.svgW || 0;
   const svgH = partState.svgH || 0;
-  const cx = svgW * ds / 2;
-  const cy = svgH * ds / 2;
+  const vbMinX = partState.svgViewboxOffsetX || 0;
+  const vbMinY = partState.svgViewboxOffsetY || 0;
+  
+  // Visual center of the part (center of viewBox area) in pixel coords
+  const cx = (vbMinX + svgW / 2) * ds;
+  const cy = (vbMinY + svgH / 2) * ds;
   
   // Only use connectors that are officially part of this part
   const knownIds = new Set((part.connectors || []).map(c => c.id));
@@ -931,17 +1128,19 @@ function getConnectorWorldPositions(partState) {
   const results = [];
   for (const [cid, pos] of Object.entries(part.connector_positions)) {
     if (!knownIds.has(cid)) continue;
-    // Connector offset from center (pixel coords)
-    const rx = pos.x * ds - cx;
-    const ry = pos.y * ds - cy;
+    // Connector position relative to part top-left in pixel coords
+    const px = (pos.x - vbMinX) * ds;
+    const py = (pos.y - vbMinY) * ds;
     let absX, absY;
     if (svgW && svgH && rot) {
-      // Rotate around center
+      // Rotate around visual center
+      const rx = px - cx;
+      const ry = py - cy;
       absX = partState.x + cx + rx * cos - ry * sin;
       absY = partState.y + cy + rx * sin + ry * cos;
     } else {
-      absX = partState.x + pos.x * ds;
-      absY = partState.y + pos.y * ds;
+      absX = partState.x + px;
+      absY = partState.y + py;
     }
     results.push({
       connectorId: cid,
@@ -1037,6 +1236,23 @@ function updateStatus() {
   document.getElementById('statusText').textContent = '✏️ Select and drag parts. Click a connector pin to start a wire. Drag empty canvas to pan.';
   document.getElementById('statusCount').textContent = 
     `${canvasState.parts.length} parts, ${canvasState.wires.length} wires`;
+  if (typeof updateWireList === 'function') updateWireList();
+}
+
+let debugShowSnap = true;
+function toggleDebug(force) {
+  if (typeof force === 'boolean') debugShowSnap = force;
+  else debugShowSnap = !debugShowSnap;
+  const btn = document.getElementById('debugBtn');
+  const pc = document.getElementById('partsContainer');
+  if (debugShowSnap) {
+    btn.classList.add('active');
+    pc.classList.remove('debug-hidden');
+  } else {
+    btn.classList.remove('active');
+    pc.classList.add('debug-hidden');
+  }
+  renderWires();
 }
 
 function addPartToCanvas(partIdx) {
@@ -1080,6 +1296,7 @@ wrapper.ondragleave = (e) => {
 };
 wrapper.ondrop = (e) => {
   e.preventDefault();
+  wrapper.classList.remove('drag-over');
   
   // Check for sidebar part drag-drop (text/plain payload)
   const partIdx = parseInt(e.dataTransfer.getData('text/plain'));
@@ -1162,6 +1379,9 @@ wrapper.ondrop = (e) => {
 // ===== DROPPED FRITZING FILES =====
 
 /** Extract connector positions (SVG viewBox coords) from an SVG string.
+ *  Reads pin center coordinates from element attributes and applies
+ *  only the element's own transform. This is a best-effort initial pass;
+ *  the precise positions are read from the live DOM in readConnectorPositionsFromRenderedPart().
  *  Returns a map of { connectorId: {x, y} } for connectors whose
  *  pin element exists in the SVG. */
 function parseConnectorPositionsFromSvg(svgContent, connectors) {
@@ -1173,11 +1393,15 @@ function parseConnectorPositionsFromSvg(svgContent, connectors) {
     const pinEl = svgDoc.getElementById(conn.id + 'pin');
     if (!pinEl) continue;
     
-    let cx, cy;
+    let cx = 0, cy = 0;
     const tag = pinEl.tagName.toLowerCase();
     if (tag === 'rect') {
-      cx = parseFloat(pinEl.getAttribute('x') || 0) + parseFloat(pinEl.getAttribute('width') || 6) / 2;
-      cy = parseFloat(pinEl.getAttribute('y') || 0) + parseFloat(pinEl.getAttribute('height') || 6) / 2;
+      const x = parseFloat(pinEl.getAttribute('x') || 0);
+      const y = parseFloat(pinEl.getAttribute('y') || 0);
+      const w = parseFloat(pinEl.getAttribute('width') || 6);
+      const h = parseFloat(pinEl.getAttribute('height') || 6);
+      cx = x + w / 2;
+      cy = y + h / 2;
     } else if (tag === 'circle') {
       cx = parseFloat(pinEl.getAttribute('cx') || 0);
       cy = parseFloat(pinEl.getAttribute('cy') || 0);
@@ -1186,24 +1410,120 @@ function parseConnectorPositionsFromSvg(svgContent, connectors) {
       cy = parseFloat(pinEl.getAttribute('cy') || 0);
     } else continue;
     
-    // Apply SVG transform matrix if present
-    const tf = pinEl.getAttribute('transform');
-    if (tf) {
-      const m = tf.match(/matrix\s*\(([^)]+)\)/);
-      if (m) {
-        const parts = m[1].split(',').map(Number);
-        if (parts.length === 6) {
-          const [a, b, c, d, e, f] = parts;
-          const nx = a * cx + c * cy + e;
-          const ny = b * cx + d * cy + f;
-          cx = nx; cy = ny;
-        }
-      }
-    }
-    
     positions[conn.id] = { x: cx, y: cy };
   }
   return positions;
+}
+
+/** Read connector positions from a part that is already rendered on the canvas.
+ *  Uses getBBox() on the live SVG DOM elements to get correct viewBox-space
+ *  coordinates. Updates part.connector_positions and returns the positions map. */
+function readConnectorPositionsFromRenderedPart(partId) {
+  const state = canvasState.parts.find(p => p.id === partId);
+  if (!state) return {};
+  const part = findPartInDB(state.partId);
+  if (!part) return {};
+  
+  const div = document.getElementById('cp-' + partId);
+  if (!div) return {};
+  
+  const svg = div.querySelector('svg');
+  if (!svg) return {};
+  
+  const positions = {};
+  const connectors = part.connectors || [];
+  
+  for (const conn of connectors) {
+    const pinEl = svg.getElementById(conn.id + 'pin');
+    if (!pinEl) continue;
+    try {
+      const bbox = pinEl.getBBox();
+      if (bbox && isFinite(bbox.x) && isFinite(bbox.y)) {
+        positions[conn.id] = {
+          x: bbox.x + bbox.width / 2,
+          y: bbox.y + bbox.height / 2
+        };
+      }
+    } catch (e) {}
+  }
+  
+  console.log('[renderPart] readConnectorPositions for', partId, JSON.stringify(positions));
+  return positions;
+}
+
+/** Compute SVG units per 0.1" grid cell from SVG content metadata.
+ *  Follows Fritzing's convention: DPI = viewBox_width / physical_width,
+ *  then grid_spacing = DPI / 10.
+ *  Handles width in inches ("in") or millimeters ("mm").
+ *  Returns null when metadata is unavailable. */
+function computeGridSpacingFromSvg(svgContent) {
+  const wInMatch = svgContent.match(/width="([\d.]+)in"/);
+  const wMmMatch = svgContent.match(/width="([\d.]+)mm"/);
+  const vbMatch = svgContent.match(/viewBox="[\d.-]+ [\d.-]+ ([\d.]+) ([\d.]+)"/);
+  if (!vbMatch) return null;
+  const vbW = parseFloat(vbMatch[1]);
+  let physInches;
+  if (wInMatch) {
+    physInches = parseFloat(wInMatch[1]);
+  } else if (wMmMatch) {
+    physInches = parseFloat(wMmMatch[1]) / 25.4;
+  } else {
+    return null;
+  }
+  const dpi = vbW / physInches;
+  return dpi / 10;
+}
+
+/** Infer SVG units per 0.1" grid cell from connector positions.
+ *  Finds the most common gap between adjacent connectors in the same row/column.
+ *  Returns a positive number, or null when insufficient data. */
+function inferGridSpacingFromConnectors(connectorPositions) {
+  const entries = Object.entries(connectorPositions);
+  if (entries.length < 3) return null;
+  const rows = new Map();
+  for (const [, pos] of entries) {
+    const ry = Math.round(pos.y * 10) / 10;
+    if (!rows.has(ry)) rows.set(ry, []);
+    rows.get(ry).push(pos.x);
+  }
+  let bestRow = [];
+  for (const xs of rows.values()) {
+    if (xs.length > bestRow.length) bestRow = xs;
+  }
+  bestRow.sort((a, b) => a - b);
+  let gaps;
+  if (bestRow.length >= 3) {
+    gaps = [];
+    for (let i = 1; i < bestRow.length; i++) {
+      gaps.push(Math.round((bestRow[i] - bestRow[i-1]) * 100) / 100);
+    }
+  } else {
+    const cols = new Map();
+    for (const [, pos] of entries) {
+      const rx = Math.round(pos.x * 10) / 10;
+      if (!cols.has(rx)) cols.set(rx, []);
+      cols.get(rx).push(pos.y);
+    }
+    let bestCol = [];
+    for (const ys of cols.values()) {
+      if (ys.length > bestCol.length) bestCol = ys;
+    }
+    bestCol.sort((a, b) => a - b);
+    if (bestCol.length < 3) return null;
+    gaps = [];
+    for (let i = 1; i < bestCol.length; i++) {
+      gaps.push(Math.round((bestCol[i] - bestCol[i-1]) * 100) / 100);
+    }
+  }
+  if (!gaps || gaps.length === 0) return null;
+  const freq = {};
+  let maxCount = 0, bestGap = null;
+  for (const g of gaps) {
+    freq[g] = (freq[g] || 0) + 1;
+    if (freq[g] > maxCount) { maxCount = freq[g]; bestGap = g; }
+  }
+  if (bestGap && bestGap > 0.5 && bestGap < 50) return bestGap;
+  return null;
 }
 
 /** Parse bus definitions from a Fritzing FZP XML document. */
@@ -1369,24 +1689,33 @@ async function handleFzpzFile(file, dropEvent, rect, vp) {
   
   if (!svgContent) throw new Error('No SVG found in the .fzpz archive');
   
+  console.log('[fzpz] Importing', file.name, '->', meta.title, 'moduleId:', meta.moduleId);
   await placeDroppedPart(meta, svgContent, dropEvent, rect, vp, file.name);
 }
 
-/** Register a part from a dropped file and place it on the canvas. */
+/** Register a part from a dropped file and place it on the canvas.
+ *  If a part with the same moduleId already exists (e.g. re-import),
+ *  it replaces the old entry and refreshes existing canvas instances. */
 async function placeDroppedPart(meta, svgContent, dropEvent, rect, vp, fileName) {
-  // Generate a unique module ID for this dropped part
-  const partId = 'dropped_' + (meta.moduleId || Date.now().toString(36));
+  // Generate an ID based on moduleId
+  const baseId = 'dropped_' + (meta.moduleId || Date.now().toString(36));
+  
+  // Check if this part was imported before
+  const existingIdx = partsDB.findIndex(p => p.id === baseId);
+  console.log('[fzpz] placeDroppedPart baseId:', baseId, 'reimport:', existingIdx !== -1, 'connectors:', meta.connectors ? meta.connectors.length : 0);
   
   // Cache the SVG so loadSvgForPart can find it
-  droppedPartSvg[partId] = svgContent;
+  droppedPartSvg[baseId] = svgContent;
+  svgCache[baseId] = svgContent;
   
   // Compute connector positions from the SVG
   const connPositions = parseConnectorPositionsFromSvg(svgContent, meta.connectors);
+  console.log('[fzpz] connector_positions:', JSON.stringify(connPositions));
   
-  // Build part metadata entry; add it to partsDB temporarily
+  // Build fresh part metadata entry
   const partMeta = {
-    id: partId,
-    type: 'fzpz',  // treat like fzpz (SVG is cached, not fetched)
+    id: baseId,
+    type: 'fzpz',
     title: meta.title,
     source: 'dropped',
     category: 'user',
@@ -1402,11 +1731,32 @@ async function placeDroppedPart(meta, svgContent, dropEvent, rect, vp, fileName)
     grid_spacing_svg: null
   };
   
-  const idx = partsDB.length;
-  partsDB.push(partMeta);
+  // Remove old entry if re-importing, so we replace rather than pile up duplicates
+  if (existingIdx !== -1) {
+    console.log('[fzpz] REPLACING old entry at idx', existingIdx);
+    // Remove old partsDB entry (splice preserves order)
+    partsDB.splice(existingIdx, 1);
+    // Delete old IndexedDB entry
+    dbDeleteDroppedPart(baseId).catch(() => {});
+  }
   
-  // Persist to IndexedDB
-  dbPutDroppedPart({ id: partId, title: meta.title, svgContent, metadata: partMeta });
+  // Add the new entry
+  partsDB.push(partMeta);
+  console.log('[fzpz] partsDB now has', partsDB.filter(p => p.id && p.id.startsWith('dropped_')).length, 'dropped entries');
+  
+  // Persist to IndexedDB (put overwrites by same key)
+  dbPutDroppedPart({ id: baseId, title: meta.title, svgContent, metadata: partMeta });
+  
+  // Re-render any existing canvas part instances that reference this partId
+  let rerendered = 0;
+  for (const state of canvasState.parts) {
+    if (state.partId === baseId) {
+      console.log('[fzpz] re-rendering existing instance', state.id);
+      renderPart(state.id);
+      rerendered++;
+    }
+  }
+  console.log('[fzpz] rerendered', rerendered, 'existing instances of', baseId);
   
   // Compute drop position (centered under cursor)
   const rawX = (dropEvent.clientX - rect.left - vp.x) / vp.scale - 50;
@@ -1414,14 +1764,12 @@ async function placeDroppedPart(meta, svgContent, dropEvent, rect, vp, fileName)
   
   const id = 'p' + (nextPartId++);
   const displayScale = getPartDisplayScale(partMeta);
-  const rawState = { partId, x: rawX, y: rawY, displayScale };
+  const rawState = { partId: baseId, x: rawX, y: rawY, displayScale };
   const snapped = snapWithPart(rawState, rawX, rawY);
-  const newState = { partId, id, x: snapped.x, y: snapped.y, rotation: 0, displayScale };
+  const newState = { partId: baseId, id, x: snapped.x, y: snapped.y, rotation: 0, displayScale };
   canvasState.parts.push(newState);
   
   await renderPart(id);
-  
-  // Check for auto-snap to other parts' connectors
   const conns = getConnectorWorldPositions(newState);
   if (conns.length > 0) {
     for (const otherState of canvasState.parts) {
@@ -1539,9 +1887,8 @@ async function renderPart(partId) {
     return;
   }
   
-  // Compute this part's display scale so its connectors match the fixed grid
+  // Compute this part's initial display scale
   state.displayScale = getPartDisplayScale(part);
-  // Redraw grid (always at fixed GRID_PX)
   drawGrid();
   
   const parser = new DOMParser();
@@ -1554,15 +1901,19 @@ async function renderPart(partId) {
     vb = '0 0 ' + w + ' ' + h;
   }
   const vbParts = vb.split(/\s+/).map(Number);
+  const vbMinX = vbParts[0] || 0;
+  const vbMinY = vbParts[1] || 0;
   const svgW = vbParts[2] || 100;
   const svgH = vbParts[3] || 100;
   // Store SVG dimensions on state for rotation-aware position calculations
   state.svgW = svgW;
   state.svgH = svgH;
+  state.svgViewboxOffsetX = vbMinX;
+  state.svgViewboxOffsetY = vbMinY;
   
-  const ds = state.displayScale || SVG_SCALE;
-  const dispW = svgW * ds;
-  const dispH = svgH * ds;
+  let ds = state.displayScale || SVG_SCALE;
+  let dispW = svgW * ds;
+  let dispH = svgH * ds;
   
   const div = document.createElement('div');
   div.id = 'cp-' + partId;
@@ -1588,71 +1939,98 @@ async function renderPart(partId) {
     innerSvg.removeAttribute('transform');
   }
   
+  // Append to container FIRST so the SVG is in the live DOM for getBBox()
+  container.appendChild(div);
+  
+  // Read connector positions from the live rendered SVG
+  const livePositions = readConnectorPositionsFromRenderedPart(partId);
+  
+  // Compute grid_spacing_svg if not provided by the part index
+  if (!part.grid_spacing_svg) {
+    let gss = computeGridSpacingFromSvg(svgContent);
+    if (!gss && Object.keys(livePositions).length >= 3) {
+      gss = inferGridSpacingFromConnectors(livePositions);
+    }
+    if (gss && gss > 0.5 && gss < 50) {
+      part.grid_spacing_svg = gss;
+      state.displayScale = SVG_SCALE * DEFAULT_GRID_SVG / gss;
+      ds = state.displayScale;
+      dispW = svgW * ds;
+      dispH = svgH * ds;
+      div.style.width = dispW + 'px';
+      div.style.height = dispH + 'px';
+      if (innerSvg) {
+        innerSvg.setAttribute('width', dispW + 'px');
+        innerSvg.setAttribute('height', dispH + 'px');
+        innerSvg.style.width = dispW + 'px';
+        innerSvg.style.height = dispH + 'px';
+      }
+      const wrapper = div.querySelector('div:first-child');
+      if (wrapper) {
+        wrapper.style.width = dispW + 'px';
+        wrapper.style.height = dispH + 'px';
+      }
+      drawGrid();
+    }
+  }
+  
+  // Ensure positions are stored
+  part.connector_positions = livePositions;
+  
+  // Now create overlay connector pin divs using the live positions
   const connectors = part.connectors || [];
   connectors.forEach(conn => {
-    const pinId = conn.id + 'pin';
-    const pinEl = svgDoc.getElementById(pinId);
-    if (!pinEl) return;
+    const pos = livePositions[conn.id];
+    if (!pos) return;
     
-    let cx, cy, pw = 6, ph = 6;
-    const tag = pinEl.tagName.toLowerCase();
-    if (tag === 'rect') {
-      cx = parseFloat(pinEl.getAttribute('x') || 0) + parseFloat(pinEl.getAttribute('width') || 6) / 2;
-      cy = parseFloat(pinEl.getAttribute('y') || 0) + parseFloat(pinEl.getAttribute('height') || 6) / 2;
-      pw = parseFloat(pinEl.getAttribute('width') || 6);
-      ph = parseFloat(pinEl.getAttribute('height') || 6);
-    } else if (tag === 'circle') {
-      cx = parseFloat(pinEl.getAttribute('cx') || 0);
-      cy = parseFloat(pinEl.getAttribute('cy') || 0);
-      pw = ph = parseFloat(pinEl.getAttribute('r') || 3) * 2;
-    } else if (tag === 'ellipse') {
-      cx = parseFloat(pinEl.getAttribute('cx') || 0);
-      cy = parseFloat(pinEl.getAttribute('cy') || 0);
-      pw = parseFloat(pinEl.getAttribute('rx') || 3) * 2;
-      ph = parseFloat(pinEl.getAttribute('ry') || 3) * 2;
-    } else return;
-
-    // Apply SVG transform matrix if present (e.g. matrix(a,b,c,d,e,f))
-    const tf = pinEl.getAttribute('transform');
-    if (tf) {
-      const m = tf.match(/matrix\s*\(([^)]+)\)/);
-      if (m) {
-        const parts = m[1].split(',').map(Number);
-        if (parts.length === 6) {
-          const [a, b, c, d, e, f] = parts;
-          const nx = a * cx + c * cy + e;
-          const ny = b * cx + d * cy + f;
-          cx = nx;
-          cy = ny;
-        }
-      }
-    }
-    
-    const sx = (cx / svgW) * dispW;
-    const sy = (cy / svgH) * dispH;
-    const sz = Math.max(10, Math.min(20, (pw / svgW) * dispW * 2));
+    const sx = ((pos.x - vbMinX) / svgW) * dispW;
+    const sy = ((pos.y - vbMinY) / svgH) * dispH;
     
     const pinDiv = document.createElement('div');
     pinDiv.className = 'connector-pin';
-    pinDiv.style.left = (sx - sz/2) + 'px';
-    pinDiv.style.top = (sy - sz/2) + 'px';
-    pinDiv.style.width = sz + 'px';
-    pinDiv.style.height = sz + 'px';
+    pinDiv.style.left = (sx - 8) + 'px';
+    pinDiv.style.top = (sy - 8) + 'px';
+    pinDiv.style.width = '16px';
+    pinDiv.style.height = '16px';
     pinDiv.dataset.partId = partId;
     pinDiv.dataset.connectorId = conn.id;
     pinDiv.title = conn.name || conn.id;
     
     pinDiv.onmousedown = (e) => {
       e.stopPropagation();
+      // If a wire is above this connector, select the wire instead of starting a new one
+      const rect = wrapper.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+      const hitWireId = findWireAtPoint(clickX, clickY);
+      if (hitWireId) {
+        selectPart(null);
+        selectWire(hitWireId);
+        return;
+      }
       startWireDrawing(partId, conn.id, e);
     };
-    pinDiv.addEventListener('mouseenter', () => showConnectorLabel(partId, conn.id, conn.name || conn.id, pinDiv));
-    pinDiv.addEventListener('mouseleave', hideConnectorLabel);
+    pinDiv.addEventListener('mouseenter', (e) => {
+      // If a wire passes through this connector area, highlight the wire instead
+      const rect = wrapper.getBoundingClientRect();
+      const pinRect = pinDiv.getBoundingClientRect();
+      const cx = pinRect.left + pinRect.width / 2 - rect.left;
+      const cy = pinRect.top + pinRect.height / 2 - rect.top;
+      const hitWireId = findWireAtPoint(cx, cy);
+      if (hitWireId) {
+        highlightWire(hitWireId);
+        return;
+      }
+      showConnectorLabel(partId, conn.id, conn.name || conn.id, pinDiv);
+    });
+    pinDiv.addEventListener('mouseleave', () => {
+      unhighlightWire();
+      hideConnectorLabel();
+    });
     
     div.querySelector('div:first-child').appendChild(pinDiv);
   });
   
-  container.appendChild(div);
   makePartDraggable(div);
   
   // Draw a marker at the part's origin with snap point info
@@ -1665,18 +2043,19 @@ async function renderPart(partId) {
 
   
   // Draw persistent snap point anchor markers
-  const snapPoints = part.grid_snap_points || [];
-  const connPos = part.connector_positions || {};
+  const snapPoints = computeGridSnapPoints(part, ds);
+  const cp = part.connector_positions || {};
   if (snapPoints.length > 0) {
     const seenAnchors = new Set();
     for (const sp of snapPoints) {
       if (seenAnchors.has(sp.anchor)) continue;
       seenAnchors.add(sp.anchor);
-      const ap = connPos[sp.anchor];
+      const ap = cp[sp.anchor];
       if (!ap) continue;
-      const sx = (ap.x / svgW) * dispW;
-      const sy = (ap.y / svgH) * dispH;
+      const sx = ((ap.x - vbMinX) / svgW) * dispW;
+      const sy = ((ap.y - vbMinY) / svgH) * dispH;
       const marker = document.createElement('div');
+      marker.className = 'snap-anchor-marker';
       marker.style.cssText = `position:absolute;left:${sx - 4}px;top:${sy - 4}px;width:8px;height:8px;pointer-events:none;z-index:9;`;
       marker.innerHTML = '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="2.5" fill="none" stroke="#e53935" stroke-width="1.5" opacity="0.7"/><line x1="0" y1="4" x2="8" y2="4" stroke="#e53935" stroke-width="0.5" opacity="0.4"/><line x1="4" y1="0" x2="4" y2="8" stroke="#e53935" stroke-width="0.5" opacity="0.4"/></svg>';
       marker.title = `${sp.onGrid.length} connectors on this grid`;
@@ -1759,7 +2138,7 @@ function makePartDraggable(div) {
           }
           
           // Show snap target highlight on connectors close to matching
-          if (bestDist < CONNECTOR_SNAP_THRESHOLD && bestDc && bestOc) {
+          if (debugShowSnap && bestDist < CONNECTOR_SNAP_THRESHOLD && bestDc && bestOc) {
             foundSnap = true;
             // Highlight matching connectors on the dragged part
             document.querySelectorAll(`#cp-${st.id} .connector-pin[data-connector-id="${bestDc.connectorId}"]`).forEach(
@@ -1783,7 +2162,7 @@ function makePartDraggable(div) {
       // Highlight on-grid connectors based on current snap position
       const part = findPartInDB(st.partId);
       const curSnapPoints = part ? computePartSnapPoints(part) : [];
-      if (curSnapPoints.length > 0) {
+      if (debugShowSnap && curSnapPoints.length > 0) {
         // Clear previous on-grid highlights
         document.querySelectorAll(`#cp-${st.id} .connector-pin.on-grid`).forEach(el => el.classList.remove('on-grid'));
         document.querySelectorAll(`#cp-${st.id} .connector-pin.snap-anchor`).forEach(el => el.classList.remove('snap-anchor'));
@@ -1797,7 +2176,7 @@ function makePartDraggable(div) {
           if (d < closestD) { closestD = d; closestSp = sp; }
         }
         
-        if (closestSp && closestD < 1) {
+        if (closestSp && closestD < 1 && debugShowSnap) {
           for (const cid of closestSp.onGridConnectorIds) {
             document.querySelectorAll(`#cp-${st.id} .connector-pin[data-connector-id="${cid}"]`).forEach(
               el => el.classList.add('on-grid')
@@ -1925,8 +2304,9 @@ function updateSelectionToolbar() {
   const toolbarLeft = partRect.left - wrapperRect.left + (partRect.width / 2);
   const toolbarTop = partRect.top - wrapperRect.top - 42;
   
-  selectionToolbar.style.left = toolbarLeft + 'px';
-  selectionToolbar.style.top = toolbarTop + 'px';
+  const vp = canvasState.viewport;
+  selectionToolbar.style.left = ((toolbarLeft - vp.x) / vp.scale) + 'px';
+  selectionToolbar.style.top = ((toolbarTop - vp.y) / vp.scale) + 'px';
   
   // Shift left by half toolbar width (will be centered via transform)
   selectionToolbar.style.transform = 'translateX(-50%)';
@@ -2001,13 +2381,15 @@ function zOrderSelected(action) {
 
 // ===== WIRE SELECTION & MANAGEMENT =====
 
-/** Sample points along a quadratic bezier and check distance from (px, py) */
-function hitTestBezier(x1, y1, cx, cy, x2, y2, px, py, threshold) {
+/** Sample points along a cubic bezier and check distance from (px, py) */
+function hitTestCubicBezier(x1, y1, cx1, cy1, cx2, cy2, x2, y2, px, py, threshold) {
   const steps = 30;
   for (let t = 0; t <= 1; t += 1/steps) {
     const mt = 1 - t;
-    const bx = mt*mt * x1 + 2*mt*t * cx + t*t * x2;
-    const by = mt*mt * y1 + 2*mt*t * cy + t*t * y2;
+    const mt2 = mt * mt;
+    const t2 = t * t;
+    const bx = mt2*mt * x1 + 3*mt2*t * cx1 + 3*mt*t2 * cx2 + t2*t * x2;
+    const by = mt2*mt * y1 + 3*mt2*t * cy1 + 3*mt*t2 * cy2 + t2*t * y2;
     if (Math.hypot(bx - px, by - py) < threshold) return true;
   }
   return false;
@@ -2030,22 +2412,41 @@ function findWireAtPoint(px, py) {
     const x2 = tRect.left + tRect.width/2 - rect.left;
     const y2 = tRect.top + tRect.height/2 - rect.top;
     
-    const mx = (x1 + x2) / 2;
-    const my = (y1 + y2) / 2;
     const dx = x2 - x1;
     const dy = y2 - y1;
     const len = Math.hypot(dx, dy) || 1;
     const nx = -dy / len;
     const ny = dx / len;
-    const offset = w.curve || 0;
-    const cpx = mx + nx * offset;
-    const cpy = my + ny * offset;
+    const vp = canvasState.viewport;
+    const offset = (w.curve || 0) * vp.scale;
+    const cx1 = x1 + dx/3 + nx * offset;
+    const cy1 = y1 + dy/3 + ny * offset;
+    const cx2 = x2 - dx/3 + nx * offset;
+    const cy2 = y2 - dy/3 + ny * offset;
     
-    if (hitTestBezier(x1, y1, cpx, cpy, x2, y2, px, py, 8)) {
+    if (hitTestCubicBezier(x1, y1, cx1, cy1, cx2, cy2, x2, y2, px, py, 8)) {
       return w.id;
     }
   }
   return null;
+}
+
+function highlightWire(wireId) {
+  if (highlightedWire === wireId) return;
+  unhighlightWire();
+  highlightedWire = wireId;
+  document.querySelectorAll(`path[data-wire-id="${wireId}"]`).forEach(path => {
+    path.classList.add('wire-hovered');
+  });
+}
+
+function unhighlightWire() {
+  if (highlightedWire) {
+    document.querySelectorAll(`path[data-wire-id="${highlightedWire}"]`).forEach(path => {
+      path.classList.remove('wire-hovered');
+    });
+    highlightedWire = null;
+  }
 }
 
 function selectWire(wireId) {
@@ -2101,13 +2502,49 @@ function updateWireSelectionToolbar() {
       document.getElementById('wireColorPicker').value = wire.color || '#ffaa00';
     }
     
-    // Position toolbar centered at top of viewport
-    const wrapperRect = wrapper.getBoundingClientRect();
-    const toolbarLeft = wrapperRect.width / 2;
-    const toolbarTop = 12;
-    selectionToolbar.style.left = toolbarLeft + 'px';
-    selectionToolbar.style.top = toolbarTop + 'px';
-    selectionToolbar.style.transform = 'translateX(-50%)';
+    // Position toolbar near the midpoint of the selected wire
+    const fromPin = getConnectorPin(wire.f, wire.fc);
+    const toPin = getConnectorPin(wire.t, wire.tc);
+    if (fromPin && toPin) {
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const fRect = fromPin.getBoundingClientRect();
+      const tRect = toPin.getBoundingClientRect();
+      const x1 = fRect.left + fRect.width/2 - wrapperRect.left;
+      const y1 = fRect.top + fRect.height/2 - wrapperRect.top;
+      const x2 = tRect.left + tRect.width/2 - wrapperRect.left;
+      const y2 = tRect.top + tRect.height/2 - wrapperRect.top;
+      
+      const vp = canvasState.viewport;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+      const offset = (wire.curve || 0) * vp.scale;
+      // Control points (same as in renderWires)
+      const cx1 = x1 + dx/3 + nx * offset;
+      const cy1 = y1 + dy/3 + ny * offset;
+      const cx2 = x2 - dx/3 + nx * offset;
+      const cy2 = y2 - dy/3 + ny * offset;
+      // Midpoint at t=0.5 of cubic bezier
+      const mpx = (x1 + 3*cx1 + 3*cx2 + x2) / 8;
+      const mpy = (y1 + 3*cy1 + 3*cy2 + y2) / 8;
+      
+      // Curve handle position (midpoint of cubic bezier at t=0.5)
+      const handleX = mpx + 0.75 * offset * nx;
+      const handleY = mpy + 0.75 * offset * ny;
+      // Convert to canvas space for toolbar inside transformed container
+      selectionToolbar.style.left = ((handleX - vp.x) / vp.scale) + 'px';
+      selectionToolbar.style.top = ((handleY - vp.y) / vp.scale) + 'px';
+      selectionToolbar.style.transform = 'translateX(-50%)';
+    } else {
+      // Fallback: top center in canvas space
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const vp = canvasState.viewport;
+      selectionToolbar.style.left = ((wrapperRect.width / 2 - vp.x) / vp.scale) + 'px';
+      selectionToolbar.style.top = ((12 - vp.y) / vp.scale) + 'px';
+      selectionToolbar.style.transform = 'translateX(-50%)';
+    }
   } else if (document.querySelector('.canvas-part.selected')) {
     // Part is selected - handled by updateSelectionToolbar
     wireActions.classList.remove('visible');
@@ -2140,18 +2577,33 @@ function startWireDrawing(partId, connectorId, e) {
   tl.setAttribute('x2', sx); tl.setAttribute('y2', sy);
   
   document.getElementById('statusText').innerHTML = 
-    '🔌 Click another connector to connect. <span style="cursor:pointer;color:#ff0" onclick="cancelWireDrawing()">[Cancel]</span>';
+    '🔌 Click a connector to connect. <span style="cursor:pointer;color:#ff0" onclick="cancelWireDrawing()">[Cancel]</span>';
   
-  document.querySelectorAll(`.connector-pin[data-part-id="${partId}"]`).forEach(el => el.classList.add('wire-source'));
-  
+  // Show yellow circle on the source connector
+  pinEl.classList.add('wire-source');
+  // Potential target highlighted dynamically in onMove
+  let prevTarget = null;
   const onMove = (ev) => {
     if (!wireDrawing) return;
     tl.setAttribute('x2', ev.clientX - rect.left);
     tl.setAttribute('y2', ev.clientY - rect.top);
+    
+    // Remove highlight from previous target (but not the source)
+    if (prevTarget && prevTarget !== pinEl) {
+      prevTarget.classList.remove('wire-source');
+    }
+    prevTarget = null;
+    
+    // Highlight potential target connector under cursor
+    const target = document.elementFromPoint(ev.clientX, ev.clientY);
+    if (target && target.classList.contains('connector-pin') && target.dataset.connectorId !== connectorId) {
+      target.classList.add('wire-source');
+      prevTarget = target;
+    }
   };
   const onUp = (ev) => {
     const target = document.elementFromPoint(ev.clientX, ev.clientY);
-    if (target && target.classList.contains('connector-pin') && target.dataset.partId !== partId) {
+    if (target && target.classList.contains('connector-pin') && target.dataset.connectorId !== connectorId) {
       completeWire(target.dataset.partId, target.dataset.connectorId);
     }
     cancelWireDrawing();
@@ -2212,25 +2664,26 @@ function renderWires() {
     const wireSel = (selectedWire === w.id);
     const isSelected = wireSel || partHl;
     
-    // Compute bezier control points
-    const mx = (x1 + x2) / 2;
-    const my = (y1 + y2) / 2;
+    const vp = canvasState.viewport;
     const dx = x2 - x1;
     const dy = y2 - y1;
     const len = Math.hypot(dx, dy) || 1;
     // Perpendicular offset direction
     const nx = -dy / len;
     const ny = dx / len;
-    const offset = w.curve || 0;
-    const cx = mx + nx * offset;
-    const cy = my + ny * offset;
+    const offset = (w.curve || 0) * vp.scale;
+    // Two control points: one near each connector, at 1/3 of the way along
+    const cx1 = x1 + dx/3 + nx * offset;
+    const cy1 = y1 + dy/3 + ny * offset;
+    const cx2 = x2 - dx/3 + nx * offset;
+    const cy2 = y2 - dy/3 + ny * offset;
     
     const strokeColor = wireSel ? '#4fc3f7' : (w.color || '#ffaa00');
     const strokeWidth = wireSel ? '3.5' : (partHl ? '3' : '2');
     
-    // Draw the visible bezier path
+    // Draw the visible cubic bezier path
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    const d = `M ${x1} ${y1} Q ${cx} ${cy}, ${x2} ${y2}`;
+    const d = `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`;
     path.setAttribute('d', d);
     path.setAttribute('stroke', strokeColor);
     path.setAttribute('stroke-width', strokeWidth);
@@ -2253,12 +2706,70 @@ function renderWires() {
     
     // Endpoint dots
     const dotColor = wireSel ? '#4fc3f7' : (w.color || '#ffaa00');
-    for (const [cx2, cy2] of [[x1, y1], [x2, y2]]) {
+    for (const [ex, ey] of [[x1, y1], [x2, y2]]) {
       const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      dot.setAttribute('cx', cx2); dot.setAttribute('cy', cy2);
+      dot.setAttribute('cx', ex); dot.setAttribute('cy', ey);
       dot.setAttribute('r', '2.5');
       dot.setAttribute('fill', dotColor);
       svg.appendChild(dot);
+    }
+    
+    // Debug: show Bezier control points
+    if (debugShowSnap) {
+      // Tangent line from start to control point 1
+      const tan1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      tan1.setAttribute('x1', x1); tan1.setAttribute('y1', y1);
+      tan1.setAttribute('x2', cx1); tan1.setAttribute('y2', cy1);
+      tan1.setAttribute('stroke', '#e53935'); tan1.setAttribute('stroke-width', '1');
+      tan1.setAttribute('stroke-dasharray', '3,3'); tan1.setAttribute('opacity', '0.6');
+      svg.appendChild(tan1);
+      
+      // Tangent line from control point 2 to end
+      const tan2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      tan2.setAttribute('x1', cx2); tan2.setAttribute('y1', cy2);
+      tan2.setAttribute('x2', x2); tan2.setAttribute('y2', y2);
+      tan2.setAttribute('stroke', '#e53935'); tan2.setAttribute('stroke-width', '1');
+      tan2.setAttribute('stroke-dasharray', '3,3'); tan2.setAttribute('opacity', '0.6');
+      svg.appendChild(tan2);
+      
+      // Control point 1 circle (hollow)
+      const cp1 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      cp1.setAttribute('cx', cx1); cp1.setAttribute('cy', cy1);
+      cp1.setAttribute('r', '3.5');
+      cp1.setAttribute('fill', 'none'); cp1.setAttribute('stroke', '#e53935');
+      cp1.setAttribute('stroke-width', '1.5'); cp1.setAttribute('opacity', '0.8');
+      svg.appendChild(cp1);
+      
+      // Control point 1 center dot
+      const cp1dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      cp1dot.setAttribute('cx', cx1); cp1dot.setAttribute('cy', cy1);
+      cp1dot.setAttribute('r', '1.5');
+      cp1dot.setAttribute('fill', '#e53935'); cp1dot.setAttribute('opacity', '0.9');
+      svg.appendChild(cp1dot);
+      
+      // Control point 2 circle (hollow)
+      const cp2 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      cp2.setAttribute('cx', cx2); cp2.setAttribute('cy', cy2);
+      cp2.setAttribute('r', '3.5');
+      cp2.setAttribute('fill', 'none'); cp2.setAttribute('stroke', '#e53935');
+      cp2.setAttribute('stroke-width', '1.5'); cp2.setAttribute('opacity', '0.8');
+      svg.appendChild(cp2);
+      
+      // Control point 2 center dot
+      const cp2dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      cp2dot.setAttribute('cx', cx2); cp2dot.setAttribute('cy', cy2);
+      cp2dot.setAttribute('r', '1.5');
+      cp2dot.setAttribute('fill', '#e53935'); cp2dot.setAttribute('opacity', '0.9');
+      svg.appendChild(cp2dot);
+      
+      // Midpoint of the curve (t=0.5) marker
+      const mpx = (x1 + 3*cx1 + 3*cx2 + x2) / 8;
+      const mpy = (y1 + 3*cy1 + 3*cy2 + y2) / 8;
+      const mid = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      mid.setAttribute('cx', mpx); mid.setAttribute('cy', mpy);
+      mid.setAttribute('r', '2');
+      mid.setAttribute('fill', '#ffaa00'); mid.setAttribute('opacity', '0.7');
+      svg.appendChild(mid);
     }
   });
   
@@ -2296,17 +2807,20 @@ function updateWireCurveHandle() {
   const x2 = tRect.left + tRect.width/2 - rect.left;
   const y2 = tRect.top + tRect.height/2 - rect.top;
   
-  const mx = (x1 + x2) / 2;
-  const my = (y1 + y2) / 2;
+  const vp = canvasState.viewport;
   const dx = x2 - x1;
   const dy = y2 - y1;
   const len = Math.hypot(dx, dy) || 1;
   const nx = -dy / len;
   const ny = dx / len;
-  const offset = w.curve || 0;
+  const offset = (w.curve || 0) * vp.scale;
   
-  const hx = mx + nx * offset;
-  const hy = my + ny * offset;
+  // Curve handle at midpoint of the cubic bezier (t=0.5)
+  // B(0.5) = (P0 + 3*P1 + 3*P2 + P3) / 8
+  // With P1 = start + (end-start)/3 + offset, P2 = end - (end-start)/3 + offset:
+  // B(0.5) = midpoint + 0.75 * offset in perpendicular direction
+  const hx = (x1 + x2) / 2 + 0.75 * nx * offset;
+  const hy = (y1 + y2) / 2 + 0.75 * ny * offset;
   
   if (!handle) {
     handle = document.createElement('div');
@@ -2336,8 +2850,6 @@ function updateWireCurveHandle() {
         const px2 = tr.left + tr.width/2 - r.left;
         const py2 = tr.top + tr.height/2 - r.top;
         
-        const pmx = (px1 + px2) / 2;
-        const pmy = (py1 + py2) / 2;
         const pdx = px2 - px1;
         const pdy = py2 - py1;
         const plen = Math.hypot(pdx, pdy) || 1;
@@ -2348,9 +2860,15 @@ function updateWireCurveHandle() {
         const mxx = ev.clientX - r.left;
         const myy = ev.clientY - r.top;
         
-        // Signed distance from midpoint along perpendicular
+        // The handle is at midpoint + 0.75 * offset (perpendicular)
+        // So the perpendicular distance from the line's midpoint to mouse
+        // needs to be divided by 0.75 to get the effective offset,
+        // then divided by vp.scale to store in canvas space
+        const pmx = (px1 + px2) / 2;
+        const pmy = (py1 + py2) / 2;
         const dist = (mxx - pmx) * pnx + (myy - pmy) * pny;
-        wire.curve = Math.round(dist * 10) / 10;
+        const vp = canvasState.viewport;
+        wire.curve = Math.round((dist / 0.75 / vp.scale) * 10) / 10;
         
         renderWires();
         saveStateToUrl();
@@ -2508,6 +3026,25 @@ function hideConnectorLabel() {
   clearNetHighlights();
 }
 
+// ===== WIRE HOVER HIGHLIGHT =====
+
+wrapper.addEventListener('mousemove', (e) => {
+  if (wireDrawing || panState) return;
+  const rect = wrapper.getBoundingClientRect();
+  const px = e.clientX - rect.left;
+  const py = e.clientY - rect.top;
+  const hitWireId = findWireAtPoint(px, py);
+  if (hitWireId && hitWireId !== highlightedWire) {
+    highlightWire(hitWireId);
+  } else if (!hitWireId && highlightedWire) {
+    unhighlightWire();
+  }
+});
+
+wrapper.addEventListener('mouseleave', () => {
+  unhighlightWire();
+});
+
 // ===== PAN =====
 let panState = null;
 
@@ -2626,11 +3163,13 @@ function applyViewport() {
   drawGrid();
   renderWires();
   updateSelectionToolbar();
+  updateWireSelectionToolbar();
 }
 
 // ===== URL STATE =====
 function saveStateToUrl() {
   const state = {
+    d: debugShowSnap ? 1 : 0,
     p: canvasState.parts.map(pt => ({
       i: pt.partId,
       x: Math.round(pt.x * 10) / 10,
@@ -2686,6 +3225,7 @@ function loadStateFromUrl() {
       }
       updateStatus();
       if (canvasState.parts.length > 0) hideEmptyState();
+      if (state.hasOwnProperty('d')) toggleDebug(state.d !== 0);
     });
   } catch (e) {
     console.error('Failed to load state:', e);
@@ -2708,7 +3248,7 @@ function clearAll() {
   if (!confirm('Clear all parts and wires?')) return;
   canvasState.parts = []; canvasState.wires = []; selectedWire = null;
   document.getElementById('wireCurveHandle')?.remove();
-  container.innerHTML = '';
+  container.querySelectorAll('.canvas-part').forEach(el => el.remove());
   wiresSvg.innerHTML = '';
   document.getElementById('emptyState').style.display = '';
   // Clean up dropped part data from partsDB
@@ -2772,6 +3312,164 @@ window.addEventListener('resize', () => {
   drawGrid();
   renderWires();
 });
+
+// ===== WIRE LIST PANEL =====
+let wireListExpanded = true;
+
+function toggleWireList() {
+  wireListExpanded = !wireListExpanded;
+  const body = document.getElementById('wireListBody');
+  const arrow = document.getElementById('wireListArrow');
+  if (wireListExpanded) {
+    body.style.display = 'block';
+    arrow.classList.add('expanded');
+  } else {
+    body.style.display = 'none';
+    arrow.classList.remove('expanded');
+  }
+}
+
+// Track expanded/collapsed state for each group key 'fromPartId:toPartId'
+let wireTreeExpanded = {};
+
+function toggleWireTreeGroup(key) {
+  wireTreeExpanded[key] = !wireTreeExpanded[key];
+  const body = document.querySelector(`.wire-tree-children[data-group="${key}"]`);
+  const arrow = document.querySelector(`.wire-tree-header[data-group="${key}"] .arrow`);
+  if (body && arrow) {
+    body.style.display = wireTreeExpanded[key] ? 'block' : 'none';
+    arrow.classList.toggle('expanded', wireTreeExpanded[key]);
+  }
+}
+
+function updateWireList() {
+  const items = document.getElementById('wireListItems');
+  const empty = document.getElementById('wireListEmpty');
+  const count = document.getElementById('wireCountDisplay');
+  
+  count.textContent = canvasState.wires.length;
+  
+  if (canvasState.wires.length === 0) {
+    empty.style.display = 'block';
+    items.innerHTML = '';
+    return;
+  }
+  empty.style.display = 'none';
+  
+  // Group wires by (fromPart, toPart) pair, with canonical key
+  const groups = new Map();
+  
+  for (let i = canvasState.wires.length - 1; i >= 0; i--) {
+    const w = canvasState.wires[i];
+    const fromState = canvasState.parts.find(p => p.id === w.f);
+    const toState = canvasState.parts.find(p => p.id === w.t);
+    if (!fromState || !toState) continue;
+    
+    const fromPart = findPartInDB(fromState.partId);
+    const toPart = findPartInDB(toState.partId);
+    if (!fromPart || !toPart) continue;
+    
+    // Canonical key: sort from/to alphabetically by part title
+    const fromTitle = fromPart.title;
+    const toTitle = toPart.title;
+    let key, displayFrom, displayTo, displayFromState, displayFromPart, displayToPart;
+    if (fromTitle < toTitle || (fromTitle === toTitle && fromState.id < toState.id)) {
+      key = fromState.id + ':' + toState.id;
+      displayFrom = fromTitle; displayTo = toTitle;
+      displayFromState = fromState; displayToState = toState;
+      displayFromPart = fromPart; displayToPart = toPart;
+    } else {
+      key = toState.id + ':' + fromState.id;
+      displayFrom = toTitle; displayTo = fromTitle;
+      displayFromState = toState; displayToState = fromState;
+      displayFromPart = toPart; displayToPart = fromPart;
+    }
+    
+    if (!groups.has(key)) {
+      groups.set(key, {
+        fromPart: displayFromPart, toPart: displayToPart,
+        fromState: displayFromState, toState: displayToState,
+        fromTitle: displayFrom, toTitle: displayTo,
+        wires: []
+      });
+    }
+    groups.get(key).wires.push(w);
+  }
+  
+  let html = '';
+  for (const [key, group] of groups) {
+    const isExpanded = wireTreeExpanded[key] !== false; // default expanded
+    html += `<div class="wire-tree-group">
+      <div class="wire-tree-header" data-group="${key}" onclick="toggleWireTreeGroup('${key}')">
+        <span class="arrow ${isExpanded ? 'expanded' : ''}">▶</span>
+        <span class="wire-tree-from">${escHtml(group.fromTitle)}</span>
+        <span class="wire-tree-arrow">→</span>
+        <span class="wire-tree-to">${escHtml(group.toTitle)}</span>
+        <span class="wire-tree-count">${group.wires.length}</span>
+      </div>
+      <div class="wire-tree-children" data-group="${key}" style="display:${isExpanded ? 'block' : 'none'}">`;
+    
+    for (const w of group.wires) {
+      const fromConn = (group.fromPart.connectors || []).find(c => c.id === w.fc);
+      const toConn = (group.toPart.connectors || []).find(c => c.id === w.tc);
+      const fromConnName = fromConn ? (fromConn.name || fromConn.id) : w.fc;
+      const toConnName = toConn ? (toConn.name || toConn.id) : w.tc;
+      const color = w.color || '#ffaa00';
+      const isSelected = (selectedWire === w.id);
+      
+      html += `<div class="wire-tree-item" data-wire-id="${w.id}" style="${isSelected ? 'background:#2a3a4a;color:#fff' : ''}" onclick="selectWireListItem('${w.id}')" title="${escHtml(group.fromTitle)}:${escHtml(fromConnName)} → ${escHtml(group.toTitle)}:${escHtml(toConnName)}">
+        <span class="wire-color-dot" style="background:${color}"></span>
+        <span class="wire-conn-from">${escHtml(fromConnName)}</span>
+        <span class="wire-conn-arrow">→</span>
+        <span class="wire-conn-to">${escHtml(toConnName)}</span>
+      </div>`;
+    }
+    
+    html += `</div></div>`;
+  }
+  items.innerHTML = html;
+}
+
+function selectWireListItem(wireId) {
+  selectPart(null);
+  selectWire(wireId);
+  updateWireList();
+}
+
+function copyWiresAsJson() {
+  const wireData = canvasState.wires.map(w => {
+    const fromState = canvasState.parts.find(p => p.id === w.f);
+    const toState = canvasState.parts.find(p => p.id === w.t);
+    const fromPart = fromState ? findPartInDB(fromState.partId) : null;
+    const toPart = toState ? findPartInDB(toState.partId) : null;
+    const fromConn = fromPart ? (fromPart.connectors || []).find(c => c.id === w.fc) : null;
+    const toConn = toPart ? (toPart.connectors || []).find(c => c.id === w.tc) : null;
+    return {
+      from: {
+        partId: w.f,
+        partTitle: fromPart ? fromPart.title : w.f,
+        connectorId: w.fc,
+        connectorName: fromConn ? (fromConn.name || fromConn.id) : w.fc
+      },
+      to: {
+        partId: w.t,
+        partTitle: toPart ? toPart.title : w.t,
+        connectorId: w.tc,
+        connectorName: toConn ? (toConn.name || toConn.id) : w.tc
+      },
+      color: w.color || '#ffaa00',
+      curve: w.curve || 0
+    };
+  });
+  
+  const json = JSON.stringify(wireData, null, 2);
+  navigator.clipboard.writeText(json).then(() => {
+    document.getElementById('statusText').textContent = '✅ Wire JSON copied!';
+    setTimeout(() => { document.getElementById('statusText').textContent = ''; updateStatus(); }, 2000);
+  }).catch(() => {
+    prompt('Copy wire JSON:', json);
+  });
+}
 
 // ===== INIT =====
 loadPartsDB();
