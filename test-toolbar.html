@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wire Toolbar Unit Test</title>
+<script src="toolbar-position.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: monospace; background: #1e1e1e; color: #ccc; padding: 20px; }
@@ -62,51 +63,6 @@ h1 { font-size: 18px; margin-bottom: 12px; color: #fff; }
 
 <script>
 // Positioning logic (same as index.html)
-function computeToolbarPosition(x1, y1, x2, y2, curve, viewportScale) {
-  var dx = x2 - x1;
-  var dy = y2 - y1;
-  var len = Math.hypot(dx, dy) || 1;
-  var nx = -dy / len;
-  var ny = dx / len;
-  var offset = (curve || 0) * viewportScale;
-
-  var cx1 = x1 + dx/3 + nx * offset;
-  var cy1 = y1 + dy/3 + ny * offset;
-  var cx2 = x2 - dx/3 + nx * offset;
-  var cy2 = y2 - dy/3 + ny * offset;
-
-  var mpx = (x1 + 3*cx1 + 3*cx2 + x2) / 8;
-  var mpy = (y1 + 3*cy1 + 3*cy2 + y2) / 8;
-
-  var handleX = mpx + 0.75 * offset * nx;
-  var handleY = mpy + 0.75 * offset * ny;
-
-  var curveVal = curve || 0;
-  var offDirX, offDirY;
-  if (curveVal === 0) {
-    if (ny < 0) { offDirX = nx; offDirY = ny; }
-    else { offDirX = -nx; offDirY = -ny; }
-  } else {
-    var sign = curveVal > 0 ? 1 : -1;
-    offDirX = sign * nx;
-    offDirY = sign * ny;
-  }
-
-  var isHorizontal = Math.abs(dx) >= Math.abs(dy);
-  var transform = isHorizontal ? 'translateX(-50%)' : 'translateY(-50%)';
-  var left = handleX + offDirX * 12;
-  var top = handleY + offDirY * 12;
-
-  return {
-    handleX: handleX, handleY: handleY,
-    offDirX: offDirX, offDirY: offDirY,
-    left: left, top: top,
-    transform: transform,
-    isHorizontal: isHorizontal,
-    offset: offset
-  };
-}
-
 function buildCubicPath(x1, y1, x2, y2, curve, scale) {
   var dx = x2 - x1;
   var dy = y2 - y1;

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>breadboard.ing — Online Breadboard Layout Tool</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="toolbar-position.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
@@ -185,8 +186,6 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
   position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 0;
 }
-
-#partsContainer { position: absolute; top: 0; left: 0; z-index: 60; }
 
 .canvas-part {
   position: absolute; cursor: move; z-index: 1; user-select: none;
@@ -510,7 +509,7 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
       <div class="wires-overlay" id="wiresOverlay">
         <svg id="wiresSvg"></svg>
       </div>
-      <div id="partsContainer">
+      <div id="partsContainer"></div>
       <div class="selection-toolbar" id="selectionToolbar">
         <!-- Part actions -->
         <span class="part-actions" id="partActions">
@@ -535,7 +534,6 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
           <span class="sep"></span>
           <button onclick="resetWireCurve()" title="Reset curve">↩️</button>
         </span>
-      </div>
       </div>
       <div class="connector-label" id="connectorLabel"></div>
       <svg class="wire-drawing-line" id="wireDrawingLine" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:60">
@@ -2304,9 +2302,8 @@ function updateSelectionToolbar() {
   const toolbarLeft = partRect.left - wrapperRect.left + (partRect.width / 2);
   const toolbarTop = partRect.top - wrapperRect.top - 42;
   
-  const vp = canvasState.viewport;
-  selectionToolbar.style.left = ((toolbarLeft - vp.x) / vp.scale) + 'px';
-  selectionToolbar.style.top = ((toolbarTop - vp.y) / vp.scale) + 'px';
+  selectionToolbar.style.left = toolbarLeft + 'px';
+  selectionToolbar.style.top = toolbarTop + 'px';
   
   // Shift left by half toolbar width (will be centered via transform)
   selectionToolbar.style.transform = 'translateX(-50%)';
@@ -2412,19 +2409,10 @@ function findWireAtPoint(px, py) {
     const x2 = tRect.left + tRect.width/2 - rect.left;
     const y2 = tRect.top + tRect.height/2 - rect.top;
     
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const len = Math.hypot(dx, dy) || 1;
-    const nx = -dy / len;
-    const ny = dx / len;
     const vp = canvasState.viewport;
-    const offset = (w.curve || 0) * vp.scale;
-    const cx1 = x1 + dx/3 + nx * offset;
-    const cy1 = y1 + dy/3 + ny * offset;
-    const cx2 = x2 - dx/3 + nx * offset;
-    const cy2 = y2 - dy/3 + ny * offset;
+    const wc = computeWireCurve(x1, y1, x2, y2, w.curve, vp.scale);
     
-    if (hitTestCubicBezier(x1, y1, cx1, cy1, cx2, cy2, x2, y2, px, py, 8)) {
+    if (hitTestCubicBezier(x1, y1, wc.cx1, wc.cy1, wc.cx2, wc.cy2, x2, y2, px, py, 8)) {
       return w.id;
     }
   }
@@ -2515,34 +2503,15 @@ function updateWireSelectionToolbar() {
       const y2 = tRect.top + tRect.height/2 - wrapperRect.top;
       
       const vp = canvasState.viewport;
-      const dx = x2 - x1;
-      const dy = y2 - y1;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = -dy / len;
-      const ny = dx / len;
-      const offset = (wire.curve || 0) * vp.scale;
-      // Control points (same as in renderWires)
-      const cx1 = x1 + dx/3 + nx * offset;
-      const cy1 = y1 + dy/3 + ny * offset;
-      const cx2 = x2 - dx/3 + nx * offset;
-      const cy2 = y2 - dy/3 + ny * offset;
-      // Midpoint at t=0.5 of cubic bezier
-      const mpx = (x1 + 3*cx1 + 3*cx2 + x2) / 8;
-      const mpy = (y1 + 3*cy1 + 3*cy2 + y2) / 8;
-      
-      // Curve handle position (midpoint of cubic bezier at t=0.5)
-      const handleX = mpx + 0.75 * offset * nx;
-      const handleY = mpy + 0.75 * offset * ny;
-      // Convert to canvas space for toolbar inside transformed container
-      selectionToolbar.style.left = ((handleX - vp.x) / vp.scale) + 'px';
-      selectionToolbar.style.top = ((handleY - vp.y) / vp.scale) + 'px';
-      selectionToolbar.style.transform = 'translateX(-50%)';
+      const tp = computeToolbarPosition(x1, y1, x2, y2, wire.curve, vp.scale);
+      selectionToolbar.style.left = tp.left + 'px';
+      selectionToolbar.style.top = tp.top + 'px';
+      selectionToolbar.style.transform = tp.transform;
     } else {
-      // Fallback: top center in canvas space
+      // Fallback: top center
       const wrapperRect = wrapper.getBoundingClientRect();
-      const vp = canvasState.viewport;
-      selectionToolbar.style.left = ((wrapperRect.width / 2 - vp.x) / vp.scale) + 'px';
-      selectionToolbar.style.top = ((12 - vp.y) / vp.scale) + 'px';
+      selectionToolbar.style.left = (wrapperRect.width / 2) + 'px';
+      selectionToolbar.style.top = '12px';
       selectionToolbar.style.transform = 'translateX(-50%)';
     }
   } else if (document.querySelector('.canvas-part.selected')) {
@@ -2665,25 +2634,14 @@ function renderWires() {
     const isSelected = wireSel || partHl;
     
     const vp = canvasState.viewport;
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const len = Math.hypot(dx, dy) || 1;
-    // Perpendicular offset direction
-    const nx = -dy / len;
-    const ny = dx / len;
-    const offset = (w.curve || 0) * vp.scale;
-    // Two control points: one near each connector, at 1/3 of the way along
-    const cx1 = x1 + dx/3 + nx * offset;
-    const cy1 = y1 + dy/3 + ny * offset;
-    const cx2 = x2 - dx/3 + nx * offset;
-    const cy2 = y2 - dy/3 + ny * offset;
+    const wc = computeWireCurve(x1, y1, x2, y2, w.curve, vp.scale);
     
     const strokeColor = wireSel ? '#4fc3f7' : (w.color || '#ffaa00');
     const strokeWidth = wireSel ? '3.5' : (partHl ? '3' : '2');
     
     // Draw the visible cubic bezier path
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    const d = `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`;
+    const d = `M ${x1} ${y1} C ${wc.cx1} ${wc.cy1}, ${wc.cx2} ${wc.cy2}, ${x2} ${y2}`;
     path.setAttribute('d', d);
     path.setAttribute('stroke', strokeColor);
     path.setAttribute('stroke-width', strokeWidth);
@@ -2719,14 +2677,14 @@ function renderWires() {
       // Tangent line from start to control point 1
       const tan1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       tan1.setAttribute('x1', x1); tan1.setAttribute('y1', y1);
-      tan1.setAttribute('x2', cx1); tan1.setAttribute('y2', cy1);
+      tan1.setAttribute('x2', wc.cx1); tan1.setAttribute('y2', wc.cy1);
       tan1.setAttribute('stroke', '#e53935'); tan1.setAttribute('stroke-width', '1');
       tan1.setAttribute('stroke-dasharray', '3,3'); tan1.setAttribute('opacity', '0.6');
       svg.appendChild(tan1);
       
       // Tangent line from control point 2 to end
       const tan2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      tan2.setAttribute('x1', cx2); tan2.setAttribute('y1', cy2);
+      tan2.setAttribute('x1', wc.cx2); tan2.setAttribute('y1', wc.cy2);
       tan2.setAttribute('x2', x2); tan2.setAttribute('y2', y2);
       tan2.setAttribute('stroke', '#e53935'); tan2.setAttribute('stroke-width', '1');
       tan2.setAttribute('stroke-dasharray', '3,3'); tan2.setAttribute('opacity', '0.6');
@@ -2734,7 +2692,7 @@ function renderWires() {
       
       // Control point 1 circle (hollow)
       const cp1 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      cp1.setAttribute('cx', cx1); cp1.setAttribute('cy', cy1);
+      cp1.setAttribute('cx', wc.cx1); cp1.setAttribute('cy', wc.cy1);
       cp1.setAttribute('r', '3.5');
       cp1.setAttribute('fill', 'none'); cp1.setAttribute('stroke', '#e53935');
       cp1.setAttribute('stroke-width', '1.5'); cp1.setAttribute('opacity', '0.8');
@@ -2742,14 +2700,14 @@ function renderWires() {
       
       // Control point 1 center dot
       const cp1dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      cp1dot.setAttribute('cx', cx1); cp1dot.setAttribute('cy', cy1);
+      cp1dot.setAttribute('cx', wc.cx1); cp1dot.setAttribute('cy', wc.cy1);
       cp1dot.setAttribute('r', '1.5');
       cp1dot.setAttribute('fill', '#e53935'); cp1dot.setAttribute('opacity', '0.9');
       svg.appendChild(cp1dot);
       
       // Control point 2 circle (hollow)
       const cp2 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      cp2.setAttribute('cx', cx2); cp2.setAttribute('cy', cy2);
+      cp2.setAttribute('cx', wc.cx2); cp2.setAttribute('cy', wc.cy2);
       cp2.setAttribute('r', '3.5');
       cp2.setAttribute('fill', 'none'); cp2.setAttribute('stroke', '#e53935');
       cp2.setAttribute('stroke-width', '1.5'); cp2.setAttribute('opacity', '0.8');
@@ -2757,16 +2715,14 @@ function renderWires() {
       
       // Control point 2 center dot
       const cp2dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      cp2dot.setAttribute('cx', cx2); cp2dot.setAttribute('cy', cy2);
+      cp2dot.setAttribute('cx', wc.cx2); cp2dot.setAttribute('cy', wc.cy2);
       cp2dot.setAttribute('r', '1.5');
       cp2dot.setAttribute('fill', '#e53935'); cp2dot.setAttribute('opacity', '0.9');
       svg.appendChild(cp2dot);
       
       // Midpoint of the curve (t=0.5) marker
-      const mpx = (x1 + 3*cx1 + 3*cx2 + x2) / 8;
-      const mpy = (y1 + 3*cy1 + 3*cy2 + y2) / 8;
       const mid = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      mid.setAttribute('cx', mpx); mid.setAttribute('cy', mpy);
+      mid.setAttribute('cx', wc.mpx); mid.setAttribute('cy', wc.mpy);
       mid.setAttribute('r', '2');
       mid.setAttribute('fill', '#ffaa00'); mid.setAttribute('opacity', '0.7');
       svg.appendChild(mid);
@@ -2808,19 +2764,14 @@ function updateWireCurveHandle() {
   const y2 = tRect.top + tRect.height/2 - rect.top;
   
   const vp = canvasState.viewport;
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const len = Math.hypot(dx, dy) || 1;
-  const nx = -dy / len;
-  const ny = dx / len;
-  const offset = (w.curve || 0) * vp.scale;
+  const wc = computeWireCurve(x1, y1, x2, y2, w.curve, vp.scale);
   
   // Curve handle at midpoint of the cubic bezier (t=0.5)
   // B(0.5) = (P0 + 3*P1 + 3*P2 + P3) / 8
   // With P1 = start + (end-start)/3 + offset, P2 = end - (end-start)/3 + offset:
   // B(0.5) = midpoint + 0.75 * offset in perpendicular direction
-  const hx = (x1 + x2) / 2 + 0.75 * nx * offset;
-  const hy = (y1 + y2) / 2 + 0.75 * ny * offset;
+  const hx = (x1 + x2) / 2 + 0.75 * wc.nx * wc.offset;
+  const hy = (y1 + y2) / 2 + 0.75 * wc.ny * wc.offset;
   
   if (!handle) {
     handle = document.createElement('div');
@@ -3163,7 +3114,6 @@ function applyViewport() {
   drawGrid();
   renderWires();
   updateSelectionToolbar();
-  updateWireSelectionToolbar();
 }
 
 // ===== URL STATE =====
@@ -3248,7 +3198,7 @@ function clearAll() {
   if (!confirm('Clear all parts and wires?')) return;
   canvasState.parts = []; canvasState.wires = []; selectedWire = null;
   document.getElementById('wireCurveHandle')?.remove();
-  container.querySelectorAll('.canvas-part').forEach(el => el.remove());
+  container.innerHTML = '';
   wiresSvg.innerHTML = '';
   document.getElementById('emptyState').style.display = '';
   // Clean up dropped part data from partsDB
