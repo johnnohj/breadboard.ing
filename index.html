@@ -1209,7 +1209,7 @@ function autoConnectMatedConnectors(draggedPartId, otherPartId, draggedState, ot
             id: 'w' + (nextWireId++),
             f: draggedPartId, fc: dcid,
             t: otherPartId, tc: ocid,
-            color: '#ffaa00',
+            color: pickWireColor(draggedPartId, dcid, otherPartId, ocid),
             curve: 0,
             auto: true
           });
@@ -1986,10 +1986,10 @@ async function renderPart(partId) {
     
     const pinDiv = document.createElement('div');
     pinDiv.className = 'connector-pin';
-    pinDiv.style.left = (sx - 8) + 'px';
-    pinDiv.style.top = (sy - 8) + 'px';
-    pinDiv.style.width = '16px';
-    pinDiv.style.height = '16px';
+    pinDiv.style.left = (sx - 5) + 'px';
+    pinDiv.style.top = (sy - 5) + 'px';
+    pinDiv.style.width = '10px';
+    pinDiv.style.height = '10px';
     pinDiv.dataset.partId = partId;
     pinDiv.dataset.connectorId = conn.id;
     pinDiv.title = conn.name || conn.id;
@@ -2525,6 +2525,78 @@ function updateWireSelectionToolbar() {
   }
 }
 
+// ===== WIRE COLOR =====
+/** Map of connector name patterns to wire colors.
+ *  Matched case-insensitively against connector name and its first word.
+ *  Colors: red for power, black for ground, blue for SDA, yellow for SCL,
+ *  orange for TX, green for RX, white for control signals. */
+const CONNECTOR_COLOR_MAP = [
+  { pattern: /^vcc|^vdd|^v\+|^3v|^3\.3v|^5v|^vin|^power|^vbat|^bat|^\+/i, color: '#e53935' },
+  { pattern: /^gnd|^ground|^vss|^v-|^0v|^vref-/i, color: '#424242' },
+  { pattern: /^sda|^sdi|^dio|^data/i, color: '#1e88e5' },
+  { pattern: /^scl|^sck|^clk|^clock/i, color: '#fdd835' },
+  { pattern: /^tx|^txd|^tx-/i, color: '#fb8c00' },
+  { pattern: /^rx|^rxd|^rx-/i, color: '#43a047' },
+  { pattern: /^cs|^ce|^en|^enable|^reset|^rst/i, color: '#ffffff' },
+];
+
+/** Get the connector info (with name) from the parts database for a canvas part. */
+function getConnectorInfo(partId, connectorId) {
+  const state = canvasState.parts.find(p => p.id === partId);
+  if (!state) return null;
+  const part = findPartInDB(state.partId);
+  if (!part || !part.connectors) return null;
+  return part.connectors.find(c => c.id === connectorId) || null;
+}
+
+/** Check a connector name against known patterns, return the named color or null. */
+function getNamedWireColor(partId, connectorId) {
+  const conn = getConnectorInfo(partId, connectorId);
+  if (!conn || !conn.name) return null;
+  const name = conn.name.trim();
+  for (const entry of CONNECTOR_COLOR_MAP) {
+    if (entry.pattern.test(name)) {
+      return entry.color;
+    }
+  }
+  return null;
+}
+
+/** Van der Corput sequence — produces evenly-spaced hue values.
+ *  n=0 → 0°, n=1 → 180°, n=2 → 90°, n=3 → 270°, n=4 → 45°, n=5 → 225°, …
+ *  This guarantees well-separated hues for any number of wires. */
+let wireHueIndex = 0;
+function vanDerCorput(n) {
+  let result = 0;
+  let denominator = 1;
+  while (n > 0) {
+    denominator *= 2;
+    result += (n % 2) / denominator;
+    n = Math.floor(n / 2);
+  }
+  return result;
+}
+function getNextHueBasedColor() {
+  const hue = vanDerCorput(wireHueIndex) * 360;
+  wireHueIndex++;
+  return `hsl(${hue}, 80%, 55%)`;
+}
+
+/** Pick the best wire color for a connection between two connectors.
+ *  Priority:
+ *  1. Named color from connector names (power → red, gnd → black, etc.)
+ *     — checks both connectors, preferring the first match
+ *  2. Hue-based color from the evenly-spaced sequence */
+function pickWireColor(fromPartId, fromConnectorId, toPartId, toConnectorId) {
+  // Try named colors from both connector names
+  const c1 = getNamedWireColor(fromPartId, fromConnectorId);
+  if (c1) return c1;
+  const c2 = getNamedWireColor(toPartId, toConnectorId);
+  if (c2) return c2;
+  // Fall back to hue-based color
+  return getNextHueBasedColor();
+}
+
 // ===== WIRE DRAWING =====
 function startWireDrawing(partId, connectorId, e) {
   const div = document.getElementById('cp-' + partId);
@@ -2600,7 +2672,7 @@ function completeWire(toPartId, toConnector) {
       id: 'w' + (nextWireId++),
       f: wireDrawing.fromPartId, fc: wireDrawing.fromConnector,
       t: toPartId, tc: toConnector,
-      color: '#ffaa00',
+      color: pickWireColor(wireDrawing.fromPartId, wireDrawing.fromConnector, toPartId, toConnector),
       curve: 0
     });
     renderWires();
