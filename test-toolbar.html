@@ -207,7 +207,7 @@ makeScenario(
   'curve=40 at scale=2 => screen offset = 80.',
   { x1: 50, y1: 80, x2: 270, y2: 80, curve: 40, scale: 2 },
   [
-    function(p) { return assertClose(p.offset, 80, 0.01, 'screen offset = 40 * 2'); },
+    function(p) { return assertClose(p._curve.offset, 80, 0.01, 'screen offset = 40 * 2'); },
     function(p) { return assert(p.handleY > 80, 'handleY below line (curve bends down)'); },
   ]
 );
