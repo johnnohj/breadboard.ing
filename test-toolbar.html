@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wire Toolbar Unit Test</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: monospace; background: #1e1e1e; color: #ccc; padding: 20px; }
+h1 { font-size: 18px; margin-bottom: 12px; color: #fff; }
+.scenario { margin-bottom: 24px; border: 1px solid #444; border-radius: 8px; padding: 16px; background: #252526; }
+.scenario h2 { font-size: 14px; margin-bottom: 8px; color: #4fc3f7; }
+.scenario .desc { font-size: 12px; color: #888; margin-bottom: 8px; }
+.test-case { display: flex; gap: 24px; align-items: flex-start; margin-top: 8px; }
+.wire-viewport {
+  position: relative;
+  width: 320px; height: 160px;
+  background: #161616;
+  border: 1px solid #333;
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.wire-viewport svg { width: 100%; height: 100%; display: block; }
+.wire-viewport .toolbar {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #2d2d2d;
+  border: 1px solid #3c3c3c;
+  border-radius: 8px;
+  padding: 3px 6px;
+  z-index: 200;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  font-size: 10px;
+  color: #aaa;
+  white-space: nowrap;
+}
+.wire-viewport .toolbar .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.3);
+  display: inline-block;
+}
+.result {
+  font-size: 12px;
+  color: #aaa;
+  line-height: 1.6;
+}
+.result .pass { color: #4caf50; }
+.result .fail { color: #e53935; }
+.result .info { color: #888; }
+.summary { margin-top: 16px; padding: 12px; border-radius: 8px; font-size: 14px; }
+.summary.pass { background: #1b3d1b; color: #81c784; }
+.summary.fail { background: #3d1b1b; color: #e57373; }
+</style>
+</head>
+<body>
+<h1>&#x1F9EA; Wire Toolbar Positioning Tests</h1>
+<div id="results"></div>
+
+<script>
+// Positioning logic (same as index.html)
+function computeToolbarPosition(x1, y1, x2, y2, curve, viewportScale) {
+  var dx = x2 - x1;
+  var dy = y2 - y1;
+  var len = Math.hypot(dx, dy) || 1;
+  var nx = -dy / len;
+  var ny = dx / len;
+  var offset = (curve || 0) * viewportScale;
+
+  var cx1 = x1 + dx/3 + nx * offset;
+  var cy1 = y1 + dy/3 + ny * offset;
+  var cx2 = x2 - dx/3 + nx * offset;
+  var cy2 = y2 - dy/3 + ny * offset;
+
+  var mpx = (x1 + 3*cx1 + 3*cx2 + x2) / 8;
+  var mpy = (y1 + 3*cy1 + 3*cy2 + y2) / 8;
+
+  var handleX = mpx + 0.75 * offset * nx;
+  var handleY = mpy + 0.75 * offset * ny;
+
+  var curveVal = curve || 0;
+  var offDirX, offDirY;
+  if (curveVal === 0) {
+    if (ny < 0) { offDirX = nx; offDirY = ny; }
+    else { offDirX = -nx; offDirY = -ny; }
+  } else {
+    var sign = curveVal > 0 ? 1 : -1;
+    offDirX = sign * nx;
+    offDirY = sign * ny;
+  }
+
+  var isHorizontal = Math.abs(dx) >= Math.abs(dy);
+  var transform = isHorizontal ? 'translateX(-50%)' : 'translateY(-50%)';
+  var left = handleX + offDirX * 12;
+  var top = handleY + offDirY * 12;
+
+  return {
+    handleX: handleX, handleY: handleY,
+    offDirX: offDirX, offDirY: offDirY,
+    left: left, top: top,
+    transform: transform,
+    isHorizontal: isHorizontal,
+    offset: offset
+  };
+}
+
+function buildCubicPath(x1, y1, x2, y2, curve, scale) {
+  var dx = x2 - x1;
+  var dy = y2 - y1;
+  var len = Math.hypot(dx, dy) || 1;
+  var nx = -dy / len;
+  var ny = dx / len;
+  var offset = (curve || 0) * scale;
+  var cx1 = x1 + dx/3 + nx * offset;
+  var cy1 = y1 + dy/3 + ny * offset;
+  var cx2 = x2 - dx/3 + nx * offset;
+  var cy2 = y2 - dy/3 + ny * offset;
+  return 'M ' + x1 + ' ' + y1 +
+    ' C ' + cx1.toFixed(1) + ' ' + cy1.toFixed(1) +
+    ', ' + cx2.toFixed(1) + ' ' + cy2.toFixed(1) +
+    ', ' + x2 + ' ' + y2;
+}
+
+// Test runner
+var passed = 0;
+var failed = 0;
+var results = document.getElementById('results');
+
+function assert(condition, msg) {
+  if (condition) { passed++; return {status:'pass', text:msg}; }
+  else { failed++; return {status:'fail', text:msg}; }
+}
+
+function assertClose(actual, expected, tolerance, msg) {
+  var ok = Math.abs(actual - expected) <= tolerance;
+  if (ok) { passed++; return {status:'pass', text:msg + ' (got ' + actual.toFixed(1) + ')'}; }
+  else { failed++; return {status:'fail', text:msg + ' - expected ' + expected + ', got ' + actual.toFixed(1)}; }
+}
+
+// Test scenarios
+var scenarios = [];
+
+function makeScenario(name, desc, params, checks) {
+  var pos = computeToolbarPosition(
+    params.x1, params.y1, params.x2, params.y2,
+    params.curve, params.scale
+  );
+  var failures = [];
+  for (var i = 0; i < checks.length; i++) {
+    var result = checks[i](pos);
+    if (result.status === 'fail') failures.push(result.text);
+  }
+  scenarios.push({
+    name: name, desc: desc,
+    _x1: params.x1, _y1: params.y1,
+    _x2: params.x2, _y2: params.y2,
+    _curve: params.curve, _scale: params.scale,
+    pos: pos, failures: failures, checks: checks
+  });
+}
+
+// 1. Straight horizontal wire
+makeScenario(
+  'Straight horizontal wire',
+  'Wire left to right, no curve. Toolbar above midpoint (perpendicular upward).',
+  { x1: 50, y1: 80, x2: 270, y2: 80, curve: 0, scale: 1 },
+  [
+    function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX at X midpoint'); },
+    function(p) { return assertClose(p.handleY, 80, 0.01, 'handleY = wire Y'); },
+    function(p) { return assertClose(p.offDirX, 0, 0.01, 'offDirX = 0 (perp to horizontal)'); },
+    function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1 (upward)'); },
+    function(p) { return assertClose(p.left, 160, 0.01, 'toolbar left = handleX'); },
+    function(p) { return assertClose(p.top, 68, 0.01, 'toolbar top = handleY - 12'); },
+    function(p) { return assert(p.transform === 'translateX(-50%)', 'centers horizontally'); },
+  ]
+);
+
+// 2. Straight vertical wire
+makeScenario(
+  'Straight vertical wire',
+  'Wire top to bottom, no curve. Toolbar to the right of midpoint.',
+  { x1: 160, y1: 20, x2: 160, y2: 140, curve: 0, scale: 1 },
+  [
+    function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX = wire X'); },
+    function(p) { return assertClose(p.handleY, 80, 0.01, 'handleY at Y midpoint'); },
+    function(p) { return assertClose(p.offDirX, 1, 0.01, 'offDirX = 1 (rightward)'); },
+    function(p) { return assertClose(p.offDirY, 0, 0.01, 'offDirY = 0'); },
+    function(p) { return assertClose(p.left, 172, 0.01, 'toolbar left = handleX + 12'); },
+    function(p) { return assertClose(p.top, 80, 0.01, 'toolbar top = handleY'); },
+    function(p) { return assert(p.transform === 'translateY(-50%)', 'centers vertically'); },
+  ]
+);
+
+// 3. Curved horizontal (bending up)
+makeScenario(
+  'Curved horizontal (negative, bends up)',
+  'Wire left to right, curve=-40. Convex side upward.',
+  { x1: 50, y1: 80, x2: 270, y2: 80, curve: -40, scale: 1 },
+  [
+    function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX at X midpoint'); },
+    function(p) { return assert(p.handleY < 80, 'handleY above line (upward bend)'); },
+    function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1 (upward convex)'); },
+    function(p) { return assert(p.transform === 'translateX(-50%)', 'centers horizontally'); },
+  ]
+);
+
+// 4. Curved horizontal (bending down)
+makeScenario(
+  'Curved horizontal (positive, bends down)',
+  'Wire left to right, curve=40. Convex side downward.',
+  { x1: 50, y1: 80, x2: 270, y2: 80, curve: 40, scale: 1 },
+  [
+    function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX at X midpoint'); },
+    function(p) { return assert(p.handleY > 80, 'handleY below line (downward bend)'); },
+    function(p) { return assertClose(p.offDirY, 1, 0.01, 'offDirY = 1 (downward convex)'); },
+    function(p) { return assert(p.transform === 'translateX(-50%)', 'centers horizontally'); },
+  ]
+);
+
+// 5. Curved vertical (bending right)
+makeScenario(
+  'Curved vertical (positive, bends left)',
+  'Wire top to bottom, curve=40. Convex side leftward (nx = -1 for downward wire).',
+  { x1: 160, y1: 20, x2: 160, y2: 140, curve: 40, scale: 1 },
+  [
+    function(p) { return assertClose(p.handleY, 80, 0.01, 'handleY at Y midpoint'); },
+    function(p) { return assert(p.handleX < 160, 'handleX left of line (left bend)'); },
+    function(p) { return assert(p.transform === 'translateY(-50%)', 'centers vertically'); },
+  ]
+);
+
+// 6. Zoomed in (2x)
+makeScenario(
+  'Horizontal at 2x zoom',
+  'Same params as test 1 but scale=2. Offset in screen-space.',
+  { x1: 50, y1: 80, x2: 270, y2: 80, curve: 0, scale: 2 },
+  [
+    function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX unchanged'); },
+    function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1'); },
+    function(p) { return assertClose(p.left, 160, 0.01, 'toolbar left = handleX'); },
+    function(p) { return assertClose(p.top, 68, 0.01, 'toolbar top = handleY - 12'); },
+  ]
+);
+
+// 7. Curved at 2x zoom
+makeScenario(
+  'Curved horizontal at 2x zoom',
+  'curve=40 at scale=2 => screen offset = 80.',
+  { x1: 50, y1: 80, x2: 270, y2: 80, curve: 40, scale: 2 },
+  [
+    function(p) { return assertClose(p.offset, 80, 0.01, 'screen offset = 40 * 2'); },
+    function(p) { return assert(p.handleY > 80, 'handleY below line (curve bends down)'); },
+  ]
+);
+
+// 8. Diagonal wire
+makeScenario(
+  'Diagonal (45 degrees)',
+  'Wire top-left to bottom-right, no curve.',
+  { x1: 50, y1: 30, x2: 270, y2: 130, curve: 0, scale: 1 },
+  [
+    function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX at X midpoint'); },
+    function(p) { return assertClose(p.handleY, 80, 0.01, 'handleY at Y midpoint'); },
+    function(p) { return assert(p.isHorizontal, 'categorized horizontal (|dx| >= |dy|)'); },
+  ]
+);
+
+// 9. Reverse direction
+makeScenario(
+  'Horizontal right to left',
+  'Reversed direction should produce same result.',
+  { x1: 270, y1: 80, x2: 50, y2: 80, curve: 0, scale: 1 },
+  [
+    function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX at X midpoint'); },
+    function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1 (upward)'); },
+    function(p) { return assertClose(p.top, 68, 0.01, 'toolbar top = handleY - 12'); },
+  ]
+);
+
+// 10. Zero-length wire
+makeScenario(
+  'Zero-length (degenerate)',
+  'Same start and end. Should not divide by zero.',
+  { x1: 100, y1: 100, x2: 100, y2: 100, curve: 0, scale: 1 },
+  [
+    function(p) { return assert(isFinite(p.handleX), 'handleX is finite'); },
+    function(p) { return assert(isFinite(p.handleY), 'handleY is finite'); },
+    function(p) { return assert(isFinite(p.left), 'left is finite'); },
+    function(p) { return assert(isFinite(p.top), 'top is finite'); },
+  ]
+);
+
+// Render
+var html = '';
+var totalPass = 0;
+var totalFail = 0;
+
+for (var si = 0; si < scenarios.length; si++) {
+  var s = scenarios[si];
+  var passCount = s.checks.length - s.failures.length;
+  totalPass += passCount;
+  totalFail += s.failures.length;
+
+  var statusClass = s.failures.length === 0 ? 'pass' : 'fail';
+  var sid = s.name.replace(/[^a-z0-9]/gi, '-');
+
+  html += '<div class="scenario">';
+  html += '<h2>' + s.name + '</h2>';
+  html += '<div class="desc">' + s.desc + '</div>';
+  html += '<div class="test-case">';
+  html += '<div class="wire-viewport" id="viewport-' + sid + '">';
+  html += '<svg id="svg-' + sid + '">';
+  html += '<path d="' + buildCubicPath(s._x1, s._y1, s._x2, s._y2, s._curve, s._scale) + '" stroke="#ffaa00" stroke-width="2" fill="none"/>';
+  html += '</svg>';
+  html += '<div class="toolbar" id="toolbar-' + sid + '" style="left:' + s.pos.left + 'px;top:' + s.pos.top + 'px;transform:' + s.pos.transform + '">';
+  html += '<span>&#x1F5D1;&#xFE0F;</span>';
+  html += '<span style="width:1px;height:14px;background:#444;display:inline-block"></span>';
+  html += '<span class="dot" style="background:#ffaa00"></span>';
+  html += '<span style="width:1px;height:14px;background:#444;display:inline-block"></span>';
+  html += '<span>&#x21A9;&#xFE0F;</span>';
+  html += '</div>';
+
+  html += '</div>'; // close wire-viewport
+
+  html += '<div class="result">';
+  if (s.failures.length > 0) {
+    html += '<div class="fail">&#x2717; ' + s.failures.length + ' failure(s)</div>';
+  } else {
+    html += '<div class="pass">&#x2713; all ' + s.checks.length + ' pass</div>';
+  }
+  for (var fi = 0; fi < s.failures.length; fi++) {
+    html += '<div class="fail">  &#x2717; ' + s.failures[fi] + '</div>';
+  }
+  html += '<div class="info" style="margin-top:4px">';
+  html += 'handle: (' + s.pos.handleX.toFixed(1) + ', ' + s.pos.handleY.toFixed(1) + ')';
+  html += ' &middot; offset dir: (' + s.pos.offDirX.toFixed(3) + ', ' + s.pos.offDirY.toFixed(3) + ')';
+  html += ' &middot; ' + (s.pos.isHorizontal ? 'horizontal' : 'vertical') + ' anchor';
+  html += '</div>';
+  html += '<div class="info">toolbar: left=' + s.pos.left.toFixed(1) + ' top=' + s.pos.top.toFixed(1) + ' ' + s.pos.transform + '</div>';
+  html += '</div>'; // close result
+  html += '</div>'; // close test-case
+  html += '</div>'; // close scenario
+}
+
+html += '<div class="summary ' + (totalFail === 0 ? 'pass' : 'fail') + '">';
+if (totalFail === 0) {
+  html += '&#x2713; ' + totalPass + '/' + (totalPass + totalFail) + ' tests passed';
+} else {
+  html += '&#x2717; ' + totalPass + '/' + (totalPass + totalFail) + ' tests passed';
+}
+html += '</div>';
+
+results.innerHTML = html;
+</script>
+</body>
+</html>
