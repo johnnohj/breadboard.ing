@@ -186,7 +186,7 @@ makeScenario(
     function(p) { return assertClose(p.offDirX, 0, 0.01, 'offDirX = 0 (perp to horizontal)'); },
     function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1 (upward)'); },
     function(p) { return assertClose(p.left, 160, 0.01, 'toolbar left = handleX'); },
-    function(p) { return assertClose(p.top, 36, 0.01, 'toolbar top = handleY - 44'); },
+    function(p) { return assertClose(p.top, 34, 0.01, 'toolbar top = handleY - 46'); },
     function(p) { return assert(p.transform === 'translateX(-50%)', 'centers horizontally'); },
   ]
 );
@@ -201,7 +201,7 @@ makeScenario(
     function(p) { return assertClose(p.handleY, 80, 0.01, 'handleY at Y midpoint'); },
     function(p) { return assertClose(p.offDirX, 1, 0.01, 'offDirX = 1 (rightward)'); },
     function(p) { return assertClose(p.offDirY, 0, 0.01, 'offDirY = 0'); },
-    function(p) { return assertClose(p.left, 176, 0.01, 'toolbar left = handleX + 16'); },
+    function(p) { return assertClose(p.left, 178, 0.01, 'toolbar left = handleX + 18'); },
     function(p) { return assertClose(p.top, 80, 0.01, 'toolbar top = handleY'); },
     function(p) { return assert(p.transform === 'translateY(-50%)', 'centers vertically'); },
   ]
@@ -254,7 +254,7 @@ makeScenario(
     function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX unchanged'); },
     function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1'); },
     function(p) { return assertClose(p.left, 160, 0.01, 'toolbar left = handleX'); },
-    function(p) { return assertClose(p.top, 36, 0.01, 'toolbar top = handleY - 44'); },
+    function(p) { return assertClose(p.top, 34, 0.01, 'toolbar top = handleY - 46'); },
   ]
 );
 
@@ -272,11 +272,11 @@ makeScenario(
 // 8. Diagonal wire
 makeScenario(
   'Diagonal (45 degrees)',
-  'Wire top-left to bottom-right, no curve.',
-  { x1: 50, y1: 30, x2: 270, y2: 130, curve: 0, scale: 1 },
+  'Wire top-left to bottom-right (45 degrees), no curve.',
+  { x1: 50, y1: 30, x2: 250, y2: 230, curve: 0, scale: 1 },
   [
-    function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX at X midpoint'); },
-    function(p) { return assertClose(p.handleY, 80, 0.01, 'handleY at Y midpoint'); },
+    function(p) { return assertClose(p.handleX, 150, 0.01, 'handleX = (50+250)/2'); },
+    function(p) { return assertClose(p.handleY, 130, 0.01, 'handleY = (30+230)/2'); },
     function(p) { return assert(p.isHorizontal, 'categorized horizontal (|dx| >= |dy|)'); },
   ]
 );
@@ -289,7 +289,7 @@ makeScenario(
   [
     function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX at X midpoint'); },
     function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1 (upward)'); },
-    function(p) { return assertClose(p.top, 36, 0.01, 'toolbar top = handleY - 44'); },
+    function(p) { return assertClose(p.top, 34, 0.01, 'toolbar top = handleY - 46'); },
   ]
 );
 

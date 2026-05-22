@@ -59,7 +59,7 @@ function computeWireCurve(x1, y1, x2, y2, curve, viewportScale) {
  *  @returns {object} { left, top, transform, handleX, handleY, offDirX, offDirY, isHorizontal }
  */
 function computeToolbarPosition(x1, y1, x2, y2, curve, viewportScale, offsetPx) {
-  if (offsetPx === undefined) offsetPx = 16;
+  if (offsetPx === undefined) offsetPx = 18;
   var c = computeWireCurve(x1, y1, x2, y2, curve, viewportScale);
   var curveVal = curve || 0;
 
