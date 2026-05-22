@@ -59,7 +59,7 @@ function computeWireCurve(x1, y1, x2, y2, curve, viewportScale) {
  *  @returns {object} { left, top, transform, handleX, handleY, offDirX, offDirY, isHorizontal }
  */
 function computeToolbarPosition(x1, y1, x2, y2, curve, viewportScale, offsetPx) {
-  if (offsetPx === undefined) offsetPx = 48;
+  if (offsetPx === undefined) offsetPx = 16;
   var c = computeWireCurve(x1, y1, x2, y2, curve, viewportScale);
   var curveVal = curve || 0;
 
@@ -77,8 +77,19 @@ function computeToolbarPosition(x1, y1, x2, y2, curve, viewportScale, offsetPx) 
 
   var isHorizontal = Math.abs(c.dx) >= Math.abs(c.dy);
   var transform = isHorizontal ? 'translateX(-50%)' : 'translateY(-50%)';
-  // Use larger offset for vertical wires (toolbar is wider than tall)
-  var gap = isHorizontal ? offsetPx : offsetPx + 52;
+  // Adjust offset so gap is consistent (~offsetPx) in all directions.
+  // For translateX(-50%): toolbar extends 28px below top.
+  //   Upward: top = handleY - offset, bottom = top+28, gap = offset-28
+  //   Downward: top = handleY + offset, gap = offset
+  // For translateY(-50%): toolbar extends 80px right of left.
+  //   Leftward: left = handleX - offset, right = left+80, gap = offset-80
+  //   Rightward: left = handleX + offset, gap = offset
+  var gap;
+  if (isHorizontal) {
+    gap = offDirY < 0 ? offsetPx + 28 : offsetPx;
+  } else {
+    gap = offDirX < 0 ? offsetPx + 80 : offsetPx;
+  }
   var left = c.handleX + offDirX * gap;
   var top = c.handleY + offDirY * gap;
 

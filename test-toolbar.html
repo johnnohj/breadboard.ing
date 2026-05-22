@@ -96,6 +96,25 @@ function assertClose(actual, expected, tolerance, msg) {
   else { failed++; return {status:'fail', text:msg + ' - expected ' + expected + ', got ' + actual.toFixed(1)}; }
 }
 
+/** Compute the minimum distance from the toolbar bounding box to the cubic Bezier curve.
+ *  Positive = gap, zero/negative = overlap. Samples 30 points. */
+function minToolbarDist(x1, y1, x2, y2, curve, scale, left, top, transform) {
+  var wc = computeWireCurve(x1, y1, x2, y2, curve, scale);
+  var tw = 80, th = 28, minD = Infinity;
+  for (var i = 0; i <= 30; i++) {
+    var t = i / 30, mt = 1 - t;
+    var bx = mt*mt*mt * x1 + 3*mt*mt*t * wc.cx1 + 3*mt*t*t * wc.cx2 + t*t*t * x2;
+    var by = mt*mt*mt * y1 + 3*mt*mt*t * wc.cy1 + 3*mt*t*t * wc.cy2 + t*t*t * y2;
+    var rx, ry;
+    if (transform === 'translateX(-50%)') { rx = left; ry = top + th / 2; }
+    else { rx = left + tw / 2; ry = top; }
+    var dx = Math.abs(bx - rx) - tw / 2, dy = Math.abs(by - ry) - th / 2;
+    var d = Math.sqrt(Math.max(dx, 0) * Math.max(dx, 0) + Math.max(dy, 0) * Math.max(dy, 0));
+    if (d < minD) minD = d;
+  }
+  return minD;
+}
+
 /** Check that the toolbar bounding box does not overlap the cubic Bezier curve.
  *  Samples 20 points along the curve; fails if any falls inside the toolbar rect.
  *  Toolbar approx 80x28px, tolerance 2px. */
@@ -141,6 +160,11 @@ function makeScenario(name, desc, params, checks) {
     if (!toolbarNotOverlappingWire(params.x1, params.y1, params.x2, params.y2, params.curve, params.scale, pos.left, pos.top, pos.transform)) {
       failures.push('TOOLBAR OVERLAPS WIRE');
     }
+    // Auto-check: toolbar must not be too far from the wire (max 30px gap)
+    var d = minToolbarDist(params.x1, params.y1, params.x2, params.y2, params.curve, params.scale, pos.left, pos.top, pos.transform);
+    if (d > 30) {
+      failures.push('TOOLBAR TOO FAR (' + d.toFixed(0) + 'px from wire)');
+    }
   }
   scenarios.push({
     name: name, desc: desc,
@@ -162,7 +186,7 @@ makeScenario(
     function(p) { return assertClose(p.offDirX, 0, 0.01, 'offDirX = 0 (perp to horizontal)'); },
     function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1 (upward)'); },
     function(p) { return assertClose(p.left, 160, 0.01, 'toolbar left = handleX'); },
-    function(p) { return assertClose(p.top, 32, 0.01, 'toolbar top = handleY - 48'); },
+    function(p) { return assertClose(p.top, 36, 0.01, 'toolbar top = handleY - 44'); },
     function(p) { return assert(p.transform === 'translateX(-50%)', 'centers horizontally'); },
   ]
 );
@@ -177,7 +201,7 @@ makeScenario(
     function(p) { return assertClose(p.handleY, 80, 0.01, 'handleY at Y midpoint'); },
     function(p) { return assertClose(p.offDirX, 1, 0.01, 'offDirX = 1 (rightward)'); },
     function(p) { return assertClose(p.offDirY, 0, 0.01, 'offDirY = 0'); },
-    function(p) { return assertClose(p.left, 260, 0.01, 'toolbar left = handleX + 100'); },
+    function(p) { return assertClose(p.left, 176, 0.01, 'toolbar left = handleX + 16'); },
     function(p) { return assertClose(p.top, 80, 0.01, 'toolbar top = handleY'); },
     function(p) { return assert(p.transform === 'translateY(-50%)', 'centers vertically'); },
   ]
@@ -230,7 +254,7 @@ makeScenario(
     function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX unchanged'); },
     function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1'); },
     function(p) { return assertClose(p.left, 160, 0.01, 'toolbar left = handleX'); },
-    function(p) { return assertClose(p.top, 32, 0.01, 'toolbar top = handleY - 48'); },
+    function(p) { return assertClose(p.top, 36, 0.01, 'toolbar top = handleY - 44'); },
   ]
 );
 
@@ -265,7 +289,7 @@ makeScenario(
   [
     function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX at X midpoint'); },
     function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1 (upward)'); },
-    function(p) { return assertClose(p.top, 32, 0.01, 'toolbar top = handleY - 48'); },
+    function(p) { return assertClose(p.top, 36, 0.01, 'toolbar top = handleY - 44'); },
   ]
 );
 
