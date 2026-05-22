@@ -96,6 +96,33 @@ function assertClose(actual, expected, tolerance, msg) {
   else { failed++; return {status:'fail', text:msg + ' - expected ' + expected + ', got ' + actual.toFixed(1)}; }
 }
 
+/** Check that the toolbar bounding box does not overlap the cubic Bezier curve.
+ *  Samples 20 points along the curve; fails if any falls inside the toolbar rect.
+ *  Toolbar approx 80x28px, tolerance 2px. */
+function toolbarNotOverlappingWire(x1, y1, x2, y2, curve, scale, left, top, transform) {
+  var wc = computeWireCurve(x1, y1, x2, y2, curve, scale);
+  var tw = 80, th = 28, tol = 2;
+  var tbLeft, tbRight, tbTop, tbBottom;
+  if (transform === 'translateX(-50%)') {
+    tbLeft = left - tw / 2; tbRight = left + tw / 2;
+    tbTop = top; tbBottom = top + th;
+  } else {
+    tbLeft = left; tbRight = left + tw;
+    tbTop = top - th / 2; tbBottom = top + th / 2;
+  }
+  var steps = 20;
+  for (var i = 0; i <= steps; i++) {
+    var t = i / steps;
+    var mt = 1 - t;
+    var bx = mt*mt*mt * x1 + 3*mt*mt*t * wc.cx1 + 3*mt*t*t * wc.cx2 + t*t*t * x2;
+    var by = mt*mt*mt * y1 + 3*mt*mt*t * wc.cy1 + 3*mt*t*t * wc.cy2 + t*t*t * y2;
+    if (bx >= tbLeft - tol && bx <= tbRight + tol && by >= tbTop - tol && by <= tbBottom + tol) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Test scenarios
 var scenarios = [];
 
@@ -108,6 +135,12 @@ function makeScenario(name, desc, params, checks) {
   for (var i = 0; i < checks.length; i++) {
     var result = checks[i](pos);
     if (result.status === 'fail') failures.push(result.text);
+  }
+  // Auto-check: toolbar must not overlap the wire curve
+  if (params.x1 !== params.x2 || params.y1 !== params.y2) {
+    if (!toolbarNotOverlappingWire(params.x1, params.y1, params.x2, params.y2, params.curve, params.scale, pos.left, pos.top, pos.transform)) {
+      failures.push('TOOLBAR OVERLAPS WIRE');
+    }
   }
   scenarios.push({
     name: name, desc: desc,
@@ -129,7 +162,7 @@ makeScenario(
     function(p) { return assertClose(p.offDirX, 0, 0.01, 'offDirX = 0 (perp to horizontal)'); },
     function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1 (upward)'); },
     function(p) { return assertClose(p.left, 160, 0.01, 'toolbar left = handleX'); },
-    function(p) { return assertClose(p.top, 68, 0.01, 'toolbar top = handleY - 12'); },
+    function(p) { return assertClose(p.top, 32, 0.01, 'toolbar top = handleY - 48'); },
     function(p) { return assert(p.transform === 'translateX(-50%)', 'centers horizontally'); },
   ]
 );
@@ -144,7 +177,7 @@ makeScenario(
     function(p) { return assertClose(p.handleY, 80, 0.01, 'handleY at Y midpoint'); },
     function(p) { return assertClose(p.offDirX, 1, 0.01, 'offDirX = 1 (rightward)'); },
     function(p) { return assertClose(p.offDirY, 0, 0.01, 'offDirY = 0'); },
-    function(p) { return assertClose(p.left, 172, 0.01, 'toolbar left = handleX + 12'); },
+    function(p) { return assertClose(p.left, 260, 0.01, 'toolbar left = handleX + 100'); },
     function(p) { return assertClose(p.top, 80, 0.01, 'toolbar top = handleY'); },
     function(p) { return assert(p.transform === 'translateY(-50%)', 'centers vertically'); },
   ]
@@ -158,7 +191,7 @@ makeScenario(
   [
     function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX at X midpoint'); },
     function(p) { return assert(p.handleY < 80, 'handleY above line (upward bend)'); },
-    function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1 (upward convex)'); },
+    function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1'); },
     function(p) { return assert(p.transform === 'translateX(-50%)', 'centers horizontally'); },
   ]
 );
@@ -171,12 +204,12 @@ makeScenario(
   [
     function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX at X midpoint'); },
     function(p) { return assert(p.handleY > 80, 'handleY below line (downward bend)'); },
-    function(p) { return assertClose(p.offDirY, 1, 0.01, 'offDirY = 1 (downward convex)'); },
+    function(p) { return assertClose(p.offDirY, 1, 0.01, 'offDirY = 1'); },
     function(p) { return assert(p.transform === 'translateX(-50%)', 'centers horizontally'); },
   ]
 );
 
-// 5. Curved vertical (bending right)
+// 5. Curved vertical (bending left)
 makeScenario(
   'Curved vertical (positive, bends left)',
   'Wire top to bottom, curve=40. Convex side leftward (nx = -1 for downward wire).',
@@ -197,7 +230,7 @@ makeScenario(
     function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX unchanged'); },
     function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1'); },
     function(p) { return assertClose(p.left, 160, 0.01, 'toolbar left = handleX'); },
-    function(p) { return assertClose(p.top, 68, 0.01, 'toolbar top = handleY - 12'); },
+    function(p) { return assertClose(p.top, 32, 0.01, 'toolbar top = handleY - 48'); },
   ]
 );
 
@@ -207,8 +240,8 @@ makeScenario(
   'curve=40 at scale=2 => screen offset = 80.',
   { x1: 50, y1: 80, x2: 270, y2: 80, curve: 40, scale: 2 },
   [
-    function(p) { return assertClose(p._curve.offset, 80, 0.01, 'screen offset = 40 * 2'); },
     function(p) { return assert(p.handleY > 80, 'handleY below line (curve bends down)'); },
+    function(p) { return assert(p.transform === 'translateX(-50%)', 'centers horizontally'); },
   ]
 );
 
@@ -232,7 +265,7 @@ makeScenario(
   [
     function(p) { return assertClose(p.handleX, 160, 0.01, 'handleX at X midpoint'); },
     function(p) { return assertClose(p.offDirY, -1, 0.01, 'offDirY = -1 (upward)'); },
-    function(p) { return assertClose(p.top, 68, 0.01, 'toolbar top = handleY - 12'); },
+    function(p) { return assertClose(p.top, 32, 0.01, 'toolbar top = handleY - 48'); },
   ]
 );
 

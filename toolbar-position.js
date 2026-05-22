@@ -29,9 +29,13 @@ function computeWireCurve(x1, y1, x2, y2, curve, viewportScale) {
   var mpx = (x1 + 3 * cx1 + 3 * cx2 + x2) / 8;
   var mpy = (y1 + 3 * cy1 + 3 * cy2 + y2) / 8;
 
-  // Curve handle position = curve midpoint (t=0.5)
-  var handleX = mpx + 0.75 * offset * nx;
-  var handleY = mpy + 0.75 * offset * ny;
+  // Curve handle position = curve midpoint (t=0.5) at mpx,mpy
+  // B(0.5) = (P0 + 3*P1 + 3*P2 + P3) / 8
+  // With P1 = P0 + (P3-P0)/3 + nx*offset, P2 = P3 - (P3-P0)/3 + nx*offset:
+  // B(0.5) = (P0+P3)/2 + 0.75 * nx * offset
+  // This is exactly mpx,mpy — no additional offset needed
+  var handleX = mpx;
+  var handleY = mpy;
 
   return {
     dx: dx, dy: dy, len: len,
@@ -55,7 +59,7 @@ function computeWireCurve(x1, y1, x2, y2, curve, viewportScale) {
  *  @returns {object} { left, top, transform, handleX, handleY, offDirX, offDirY, isHorizontal }
  */
 function computeToolbarPosition(x1, y1, x2, y2, curve, viewportScale, offsetPx) {
-  if (offsetPx === undefined) offsetPx = 12;
+  if (offsetPx === undefined) offsetPx = 48;
   var c = computeWireCurve(x1, y1, x2, y2, curve, viewportScale);
   var curveVal = curve || 0;
 
@@ -73,8 +77,10 @@ function computeToolbarPosition(x1, y1, x2, y2, curve, viewportScale, offsetPx) 
 
   var isHorizontal = Math.abs(c.dx) >= Math.abs(c.dy);
   var transform = isHorizontal ? 'translateX(-50%)' : 'translateY(-50%)';
-  var left = c.handleX + offDirX * offsetPx;
-  var top = c.handleY + offDirY * offsetPx;
+  // Use larger offset for vertical wires (toolbar is wider than tall)
+  var gap = isHorizontal ? offsetPx : offsetPx + 52;
+  var left = c.handleX + offDirX * gap;
+  var top = c.handleY + offDirY * gap;
 
   return {
     left: left,

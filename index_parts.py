@@ -272,138 +272,6 @@ def _apply_transform(pos, transform_str):
     return (a * x + c * y + e, b * x + d * y + f)
 
 
-def get_grid_spacing_svg(svg_content):
-    """Return SVG units per 0.1" grid cell, following Fritzing's convention.
-    Fritzing computes DPI = viewBox_width / physical_width,
-    then grid_spacing = DPI / 10 (SVG units per 0.1").
-    Handles width in inches ("in") or millimeters ("mm").
-    Returns None when metadata is unavailable."""
-    w_match = re.search(r'width="([\d.]+)in"', svg_content)
-    w_mm_match = re.search(r'width="([\d.]+)mm"', svg_content)
-    vb_match = re.search(r'viewBox="[\d.]+ [\d.]+ ([\d.]+) ([\d.]+)"', svg_content)
-    if not vb_match:
-        return None
-    vb_w = float(vb_match.group(1))
-    if w_match:
-        phys_inches = float(w_match.group(1))
-    elif w_mm_match:
-        phys_inches = float(w_mm_match.group(1)) / 25.4
-    else:
-        return None
-    dpi = vb_w / phys_inches
-    return dpi / 10  # SVG units per 0.1"
-
-
-def compute_grid_spacing_from_connectors(connector_positions):
-    """Infer SVG units per 0.1" grid cell from connector positions.
-    Finds the most common gap between adjacent connectors in the same row/column.
-    Rounds positions to 4 decimal places to handle floating-point noise.
-    Returns None when insufficient data."""
-    positions = list(connector_positions.values())
-    if len(positions) < 3:
-        return None
-
-    # Round coordinates to 4 decimal places to eliminate SVG float noise
-    rounded = [{'x': round(pt['x'], 4), 'y': round(pt['y'], 4)} for pt in positions]
-
-    # Group by Y (rounded to 1 decimal), find the row with most connectors
-    from collections import defaultdict
-    rows = defaultdict(list)
-    for pt in rounded:
-        ry = round(pt['y'], 1)
-        rows[ry].append(pt['x'])
-
-    best_row = max(rows.values(), key=lambda r: len(r))
-    best_row.sort()
-
-    if len(best_row) < 3:
-        # Try columns instead
-        cols = defaultdict(list)
-        for pt in rounded:
-            rx = round(pt['x'], 1)
-            cols[rx].append(pt['y'])
-        best_col = max(cols.values(), key=lambda r: len(r))
-        best_col.sort()
-        if len(best_col) < 3:
-            return None
-        gaps = [round(best_col[i + 1] - best_col[i], 2) for i in range(len(best_col) - 1)]
-    else:
-        gaps = [round(best_row[i + 1] - best_row[i], 2) for i in range(len(best_row) - 1)]
-
-    if not gaps:
-        return None
-    # Find the most common gap
-    from collections import Counter
-    gap_counts = Counter(gaps)
-    most_common_gap, count = gap_counts.most_common(1)[0]
-    # Ensure it's a reasonable grid spacing (between 5 and 15 SVG units for 0.1")
-    # Fritzing standard is 7.2 (72 DPI), Adafruit uses 9.0 (90 DPI), etc.
-    if 4 < most_common_gap < 20:
-        return most_common_gap
-    return None
-
-
-def compute_grid_snap_points(connectors, connector_positions, raw_positions=None, grid_spacing_svg=None):
-    """For each connector, find all others that are grid-congruent (spacing a
-    multiple of 0.1" grid cell). Uses raw (untransformed) positions when
-    available, transformed positions otherwise.
-    Returns a list of snap points, each as:
-    {"anchor": connectorId, "onGrid": [connectorId, ...]}.
-    Deduplicates by remainder to avoid identical alignments from different anchors."""
-    if grid_spacing_svg is None or grid_spacing_svg <= 0:
-        # Try to infer from connector positions
-        inferred = compute_grid_spacing_from_connectors(connector_positions)
-        if inferred:
-            G = inferred
-        else:
-            # Default to 100 DPI (standard Fritzing convention) when unknown
-            G = 10.0
-    else:
-        G = float(grid_spacing_svg)
-    EPS = 0.02
-    ids = [c['id'] for c in connectors]
-    # Use transformed positions for grid check (they account for SVG transforms).
-    # Raw positions are pre-transform and may be at a different scale.
-    check_positions = connector_positions
-    seen = set()
-    points = []
-    for i, aid in enumerate(ids):
-        a = check_positions.get(aid)
-        if not a:
-            continue
-        on_grid = [aid]
-        has_pair = False
-        for bid in ids:
-            if bid == aid:
-                continue
-            b = check_positions.get(bid)
-            if not b:
-                continue
-            dx = b['x'] - a['x']
-            dy = b['y'] - a['y']
-            # Require non-zero spacing (ignore coincident connectors or same pos)
-            if abs(dx) < EPS and abs(dy) < EPS:
-                continue
-            # Round to avoid floating-point noise (e.g. 8.9999998 instead of 9.0)
-            dx = round(dx, 4)
-            dy = round(dy, 4)
-            if abs(dx % G) < EPS and abs(dy % G) < EPS:
-                has_pair = True
-                if bid not in on_grid:
-                    on_grid.append(bid)
-        if not has_pair:
-            continue
-        # Deduplicate by remainder (rounded to avoid float noise)
-        rem_x = round((-a['x']) % G, 4)
-        rem_y = round((-a['y']) % G, 4)
-        key = f'{rem_x},{rem_y}'
-        if key in seen:
-            continue
-        seen.add(key)
-        points.append({'anchor': aid, 'onGrid': on_grid})
-    return points
-
-
 def extract_svg_connector_positions(svg_content):
     """Parse SVG content and extract connector pin positions.
     Returns (positions, raw_positions) where positions have transforms applied
@@ -542,7 +410,6 @@ def parse_fzp(fzp_path, source, category):
         
         conn_positions = {}
         raw_conn_positions = {}
-        grid_spacing = None
         breadboard_ref = svg_refs.get('breadboard', '')
         if breadboard_ref:
             svg_path = os.path.join(BASE, 'fritzing-parts', 'svg', category, breadboard_ref)
@@ -551,13 +418,8 @@ def parse_fzp(fzp_path, source, category):
                     with open(svg_path, 'r') as f:
                         svg_content = f.read()
                     conn_positions, raw_conn_positions = extract_svg_connector_positions(svg_content)
-                    grid_spacing = get_grid_spacing_svg(svg_content)
                 except Exception as e:
                     print(f"    SVG pos error {svg_path}: {e}")
-        
-        # If no SVG-derived grid spacing, try from connector positions
-        if grid_spacing is None:
-            grid_spacing = compute_grid_spacing_from_connectors(conn_positions)
         
         result = {
             'id': module_id or hashlib.md5(fzp_path.encode()).hexdigest()[:12],
@@ -571,8 +433,8 @@ def parse_fzp(fzp_path, source, category):
             'connectors': connectors,
             'connector_positions': conn_positions,
             'raw_connector_positions': raw_conn_positions,
-            'grid_snap_points': compute_grid_snap_points(connectors, conn_positions, raw_conn_positions, grid_spacing),
-            'grid_spacing_svg': grid_spacing,
+            'grid_snap_points': [],
+            'grid_spacing_svg': None,
             'tags': tags,
             'properties': props,
             'taxonomy': tax,
@@ -626,7 +488,6 @@ def parse_fzpz(fzpz_path, source, category):
             
             conn_positions = {}
             raw_conn_positions = {}
-            grid_spacing = None
             breadboard_ref = svg_refs.get('breadboard', '')
             if breadboard_ref:
                 bb_filename = breadboard_ref.split('/')[-1]
@@ -635,7 +496,6 @@ def parse_fzpz(fzpz_path, source, category):
                         try:
                             svg_content = zf.read(svg_name).decode('utf-8')
                             conn_positions, raw_conn_positions = extract_svg_connector_positions(svg_content)
-                            grid_spacing = get_grid_spacing_svg(svg_content)
                             if conn_positions:
                                 break
                         except:
@@ -647,15 +507,10 @@ def parse_fzpz(fzpz_path, source, category):
                         try:
                             svg_content = zf.read(svg_name).decode('utf-8')
                             conn_positions, raw_conn_positions = extract_svg_connector_positions(svg_content)
-                            grid_spacing = get_grid_spacing_svg(svg_content)
                             if conn_positions:
                                 break
                         except:
                             pass
-            
-            # If no SVG-derived grid spacing, try from connector positions
-            if grid_spacing is None:
-                grid_spacing = compute_grid_spacing_from_connectors(conn_positions)
             
             result = {
                 'id': module_id or hashlib.md5(fzpz_path.encode()).hexdigest()[:12],
@@ -670,8 +525,8 @@ def parse_fzpz(fzpz_path, source, category):
                 'connectors': connectors,
                 'connector_positions': conn_positions,
                 'raw_connector_positions': raw_conn_positions,
-                'grid_snap_points': compute_grid_snap_points(connectors, conn_positions, raw_conn_positions, grid_spacing),
-                'grid_spacing_svg': grid_spacing,
+                'grid_snap_points': [],
+                'grid_spacing_svg': None,
                 'tags': tags,
                 'properties': {},
                 'taxonomy': '',
