@@ -2,6 +2,8 @@
 //
 // Hosts sim.wasm + host.wasm + firmware.wasm.
 // Connected pages communicate via MessagePort.
+
+import { createJsffiBindings } from './proxy_js.mjs'
 //
 // Protocol (page → worker):
 //   { type: 'part_added',   id, partDbId, connectors: [...], buses: [[...], ...] }
@@ -141,6 +143,8 @@ function makeHal() {
         pump: () => 0,
         yield: () => {},
         flush_hw: () => {},
+        i2c_request: () => -1,  // stub: no I2C peripherals yet
+        spi_request: () => -1,  // stub: no SPI peripherals yet
         drain_inbox: (bufPtr, maxLen) => {
             if (!fwInst) return 0
             const buf = new Uint8Array(fwInst.exports.memory.buffer, bufPtr, maxLen)
@@ -342,12 +346,18 @@ async function initWasm() {
         })
         if (hostInst.exports._initialize) hostInst.exports._initialize()
 
-        // firmware.wasm
+        // firmware.wasm — needs jsffi + hal imports
         if (fwResp.ok) {
             const fwMod = await WebAssembly.compile(await fwResp.arrayBuffer())
+            const jsffi = createJsffiBindings(
+                () => fwInst.exports.memory,
+                () => fwInst.exports,
+            )
             fwInst = await WebAssembly.instantiate(fwMod, {
                 wasi_snapshot_preview1: makeWasi(() => fwInst),
+                wasi: { 'thread-spawn': () => { throw new Error('threads not supported') } },
                 hal: makeHal(),
+                jsffi,
             })
             if (fwInst.exports._initialize) fwInst.exports._initialize()
         }
