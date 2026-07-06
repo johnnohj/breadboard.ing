@@ -1,2 +1,8 @@
 # Generated SVG cache (large, rebuild on demand)
 svg_cache/
+
+# Python bytecache
+__pycache__/
+*.pyc
+
+.claude

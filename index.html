@@ -6,6 +6,9 @@
 <title>breadboard.ing — Online Breadboard Layout Tool</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="toolbar-position.js"></script>
+<script type="module" src="js/sim-runtime.mjs"></script>
+<link rel="stylesheet" href="https://pyscript.net/releases/2024.11.1/core.css">
+<script type="module" src="https://pyscript.net/releases/2024.11.1/core.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
@@ -437,6 +440,90 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #777; }
+
+/* Simulation panel (code editor + terminal) */
+.sim-panel {
+  position: absolute; bottom: 28px; right: 0; width: 420px;
+  max-height: 50vh; background: #1e1e2e; border: 1px solid #3c3c3c;
+  border-radius: 8px 0 0 0; z-index: 100; display: none;
+  flex-direction: column; overflow: hidden;
+  box-shadow: -4px -4px 16px rgba(0,0,0,0.4);
+}
+.sim-panel.visible { display: flex; }
+.sim-panel-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; background: #2d2d2d; border-bottom: 1px solid #3c3c3c;
+  font-size: 12px; color: #aaa; flex-shrink: 0;
+}
+.sim-panel-header .sim-tab {
+  padding: 3px 10px; cursor: pointer; border-radius: 3px; color: #888;
+}
+.sim-panel-header .sim-tab.active { background: #1e1e2e; color: #fff; }
+.sim-panel-header .sim-tab:hover { color: #ccc; }
+.sim-panel-header .sim-controls { margin-left: auto; display: flex; gap: 4px; }
+.sim-panel-header .sim-controls button {
+  padding: 3px 10px; border: none; border-radius: 3px;
+  font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.sim-panel-header .sim-controls .run-btn {
+  background: #a6e3a1; color: #1e1e2e;
+}
+.sim-panel-header .sim-controls .run-btn:hover { filter: brightness(1.1); }
+.sim-panel-header .sim-controls .stop-btn {
+  background: #f38ba8; color: #1e1e2e;
+}
+.sim-panel-header .sim-controls .stop-btn:hover { filter: brightness(1.1); }
+#simEditor {
+  width: 100%; flex: 1; min-height: 120px; max-height: 35vh;
+  background: #11111b; color: #cdd6f4; border: none; padding: 10px;
+  font: 13px/1.5 'Cascadia Code', 'Fira Code', monospace; resize: vertical;
+  outline: none; tab-size: 4;
+}
+#simTerminal {
+  min-height: 60px; max-height: 20vh; overflow-y: auto;
+  background: #11111b; color: #a6e3a1; padding: 8px 10px;
+  font: 13px/1.4 'Cascadia Code', 'Fira Code', monospace;
+  white-space: pre-wrap; word-break: break-all;
+  border-top: 1px solid #3c3c3c; display: none;
+}
+#simTerminal.visible { display: block; }
+#simSerialInput {
+  display: none; border-top: 1px solid #3c3c3c; flex-shrink: 0;
+}
+#simSerialInput.visible { display: flex; }
+#simSerialInput input {
+  flex: 1; background: #2d2d2d; color: #cdd6f4; border: none;
+  padding: 5px 10px; font: 12px 'Cascadia Code', monospace; outline: none;
+}
+#simSerialInput button {
+  background: #3c3c3c; color: #aaa; border: none; padding: 5px 8px;
+  cursor: pointer; font: 11px monospace;
+}
+#simSerialInput button:hover { background: #555; color: #fff; }
+
+/* Simulation pin state indicators */
+.connector-pin.pin-high {
+  background: rgba(244, 67, 54, 0.5) !important;
+  border-color: rgba(244, 67, 54, 0.8) !important;
+  box-shadow: 0 0 6px rgba(244, 67, 54, 0.5);
+}
+.connector-pin.pin-low {
+  background: rgba(79, 195, 247, 0.5) !important;
+  border-color: rgba(79, 195, 247, 0.8) !important;
+  box-shadow: 0 0 6px rgba(79, 195, 247, 0.5);
+}
+.connector-pin.pin-conflict {
+  background: rgba(255, 152, 0, 0.6) !important;
+  border-color: rgba(255, 152, 0, 0.9) !important;
+  box-shadow: 0 0 8px rgba(255, 152, 0, 0.7);
+  animation: conflictPulse 0.5s ease-in-out infinite;
+}
+@keyframes conflictPulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(255, 152, 0, 0.5); }
+  50% { box-shadow: 0 0 14px rgba(255, 152, 0, 0.9); }
+}
+.led-on { transition: background 0.1s, box-shadow 0.1s; }
+.led-off { transition: background 0.3s, box-shadow 0.3s; }
 </style>
 </head>
 <body>
@@ -497,6 +584,7 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
       <button onclick="clearAll()" class="danger">🗑️ Clear</button>
       <button onclick="copyShareLink()">🔗 Share</button>
       <button id="debugBtn" onclick="toggleDebug()" title="Toggle debug overlay" class="active">🐛</button>
+      <button onclick="toggleSimPanel()" title="Toggle simulation panel (Ctrl+Shift+S)">Sim</button>
     </div>
 
     <div class="canvas-wrapper" id="canvasWrapper">
@@ -540,9 +628,44 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
         <line id="tempWireLine" stroke="#ffaa00" stroke-width="2" stroke-dasharray="5,3"/>
       </svg>
     </div>
+    <!-- Simulation panel -->
+    <div class="sim-panel" id="simPanel">
+      <div class="sim-panel-header">
+        <span class="sim-tab active" onclick="switchSimTab('editor')">code.py</span>
+        <span class="sim-tab" onclick="switchSimTab('terminal')">Terminal</span>
+        <span id="simStatus" style="font-size:11px;color:#888;">Loading...</span>
+        <div class="sim-controls">
+          <button class="run-btn" onclick="simRunUserCode()">Run</button>
+          <button class="stop-btn" onclick="simSendCtrl(3)">Stop</button>
+          <button style="background:#3c3c3c;color:#aaa;" onclick="toggleSimPanel()">Close</button>
+        </div>
+      </div>
+      <textarea id="simEditor" spellcheck="false">import board
+import digitalio
+import time
+
+led = digitalio.DigitalInOut(board.LED)
+led.direction = digitalio.Direction.OUTPUT
+
+while True:
+    led.value = True
+    time.sleep(0.5)
+    led.value = False
+    time.sleep(0.5)
+</textarea>
+      <div id="simTerminal"></div>
+      <div id="simSerialInput">
+        <input id="simSerialIn" placeholder=">>> ">
+        <button onclick="simSendSerial()">Send</button>
+        <button onclick="simSendCtrl(3)">^C</button>
+        <button onclick="simSendCtrl(4)">^D</button>
+      </div>
+    </div>
+
     <div class="status-bar" id="statusBar">
       <span id="statusText">Ready. Click + on a part to add it.</span>
       <span id="statusCount">0 parts, 0 wires</span>
+      <span id="simStatusBar" style="cursor:pointer;" onclick="toggleSimPanel()">Sim: off</span>
     </div>
   </div>
 </div>
@@ -1205,14 +1328,16 @@ function autoConnectMatedConnectors(draggedPartId, otherPartId, draggedState, ot
           (w.f === otherPartId && w.fc === ocid && w.t === draggedPartId && w.tc === dcid)
         );
         if (!exists) {
-          canvasState.wires.push({
+          const autoWire = {
             id: 'w' + (nextWireId++),
             f: draggedPartId, fc: dcid,
             t: otherPartId, tc: ocid,
             color: pickWireColor(draggedPartId, dcid, otherPartId, ocid),
             curve: 0,
             auto: true
-          });
+          };
+          canvasState.wires.push(autoWire);
+          simNotifyWireAdded(autoWire);
           count++;
           // Highlight connected pins with snapped class
           const dpin = document.querySelector(`#cp-${draggedPartId} .connector-pin[data-connector-id="${dcid}"]`);
@@ -1268,14 +1393,14 @@ function addPartToCanvas(partIdx) {
   const x = snapped.x;
   const y = snapped.y;
   
-  canvasState.parts.push({
-    partId, id, x, y, rotation: 0, displayScale
-  });
-  
+  const newPart = { partId, id, x, y, rotation: 0, displayScale };
+  canvasState.parts.push(newPart);
+
   renderPart(id);
   updateStatus();
   saveStateToUrl();
   hideEmptyState();
+  simNotifyPartPlaced(newPart);
 }
 
 function hideEmptyState() {
@@ -1315,7 +1440,8 @@ wrapper.ondrop = (e) => {
   const newState = { partId, id, x: snapped.x, y: snapped.y, rotation: 0, displayScale };
   canvasState.parts.push(newState);
   renderPart(id);
-  
+  simNotifyPartPlaced(newState);
+
   // Check for connector snap after placement
   const conns = getConnectorWorldPositions(newState);
   if (conns.length > 0) {
@@ -1766,7 +1892,8 @@ async function placeDroppedPart(meta, svgContent, dropEvent, rect, vp, fileName)
   const snapped = snapWithPart(rawState, rawX, rawY);
   const newState = { partId: baseId, id, x: snapped.x, y: snapped.y, rotation: 0, displayScale };
   canvasState.parts.push(newState);
-  
+  simNotifyPartPlaced(newState);
+
   await renderPart(id);
   const conns = getConnectorWorldPositions(newState);
   if (conns.length > 0) {
@@ -2449,8 +2576,10 @@ function deleteSelectedWire() {
   if (!selectedWire) return;
   const idx = canvasState.wires.findIndex(w => w.id === selectedWire);
   if (idx === -1) return;
+  const removedId = selectedWire;
   canvasState.wires.splice(idx, 1);
   selectedWire = null;
+  simNotifyWireRemoved(removedId);
   document.getElementById('wireCurveHandle')?.remove();
   renderWires();
   updateStatus();
@@ -2668,16 +2797,18 @@ function completeWire(toPartId, toConnector) {
     (w.f === toPartId && w.fc === toConnector && w.t === wireDrawing.fromPartId && w.tc === wireDrawing.fromConnector)
   );
   if (!exists) {
-    canvasState.wires.push({
+    const newWire = {
       id: 'w' + (nextWireId++),
       f: wireDrawing.fromPartId, fc: wireDrawing.fromConnector,
       t: toPartId, tc: toConnector,
       color: pickWireColor(wireDrawing.fromPartId, wireDrawing.fromConnector, toPartId, toConnector),
       curve: 0
-    });
+    };
+    canvasState.wires.push(newWire);
     renderWires();
     updateStatus();
     saveStateToUrl();
+    simNotifyWireAdded(newWire);
   }
   wireDrawing = null;
 }
@@ -3226,6 +3357,8 @@ function loadStateFromUrl() {
       });
     }
     
+    // Notify sim of restored parts
+    canvasState.parts.forEach(p => simNotifyPartPlaced(p));
     const renderPromises = canvasState.parts.map(p => renderPart(p.id));
     Promise.all(renderPromises).then(() => {
       if (state.w) {
@@ -3233,14 +3366,16 @@ function loadStateFromUrl() {
           const from = canvasState.parts[w[0]];
           const to = canvasState.parts[w[2]];
           if (from && to) {
-            canvasState.wires.push({
+            const restoredWire = {
               id: 'w' + (nextWireId++),
               f: from.id, fc: w[1],
               t: to.id, tc: w[3],
               color: w[4] || '#ffaa00',
               curve: w[5] || 0,
               auto: w[6] === 1
-            });
+            };
+            canvasState.wires.push(restoredWire);
+            simNotifyWireAdded(restoredWire);
           }
         });
         renderWires();
@@ -3268,6 +3403,9 @@ function copyShareLink() {
 // ===== CLEAR =====
 function clearAll() {
   if (!confirm('Clear all parts and wires?')) return;
+  // Notify sim of all removals
+  canvasState.wires.forEach(w => simNotifyWireRemoved(w.id));
+  canvasState.parts.forEach(p => simNotifyPartRemoved(p.id));
   canvasState.parts = []; canvasState.wires = []; selectedWire = null;
   document.getElementById('wireCurveHandle')?.remove();
   container.innerHTML = '';
@@ -3312,11 +3450,16 @@ document.addEventListener('keydown', (e) => {
 });
 
 function deletePart(partId) {
+  // Notify sim of removed wires first
+  canvasState.wires.forEach(w => {
+    if (w.f === partId || w.t === partId) simNotifyWireRemoved(w.id);
+  });
   canvasState.wires = canvasState.wires.filter(w => {
     if (w.id === selectedWire) selectedWire = null;
     return w.f !== partId && w.t !== partId;
   });
   canvasState.parts = canvasState.parts.filter(p => p.id !== partId);
+  simNotifyPartRemoved(partId);
   const el = document.getElementById('cp-' + partId);
   if (el) el.remove();
   document.getElementById('wireCurveHandle')?.remove();
@@ -3493,8 +3636,112 @@ function copyWiresAsJson() {
   });
 }
 
+// ===== SIMULATION PANEL =====
+
+function toggleSimPanel() {
+  const panel = document.getElementById('simPanel');
+  panel.classList.toggle('visible');
+  const bar = document.getElementById('simStatusBar');
+  if (panel.classList.contains('visible')) {
+    bar.textContent = 'Sim: on';
+    document.getElementById('simTerminal').classList.add('visible');
+    document.getElementById('simSerialInput').classList.add('visible');
+  } else {
+    bar.textContent = 'Sim: off';
+  }
+}
+
+function switchSimTab(tab) {
+  const tabs = document.querySelectorAll('.sim-panel-header .sim-tab');
+  tabs.forEach(t => t.classList.toggle('active', t.textContent.toLowerCase().includes(tab)));
+  document.getElementById('simEditor').style.display = tab === 'editor' ? '' : 'none';
+  const showTerm = tab === 'terminal';
+  document.getElementById('simTerminal').classList.toggle('visible', true);
+  document.getElementById('simSerialInput').classList.toggle('visible', showTerm);
+}
+
+function simRunUserCode() {
+  const source = document.getElementById('simEditor').value;
+  document.getElementById('simTerminal').textContent = '';
+  if (window.simRuntime?.ready) {
+    window.simRuntime.runCode(source);
+  }
+}
+
+function simSendSerial() {
+  const input = document.getElementById('simSerialIn');
+  const text = input.value + '\r';
+  input.value = '';
+  if (window.simRuntime?.ready) {
+    window.simRuntime.serialWrite(text);
+  }
+}
+
+function simSendCtrl(code) {
+  if (window.simRuntime?.ready) {
+    if (code === 3) window.simRuntime.stop();
+    else if (code === 4) window.simRuntime.reset();
+    else window.simRuntime.serialWrite(String.fromCharCode(code));
+  }
+}
+
+// ===== SIM BRIDGE HOOKS =====
+// Send layout changes to the SharedWorker via simRuntime.
+
+function simNotifyPartPlaced(partState) {
+  if (!window.simRuntime?.ready) return;
+  const part = findPartInDB(partState.partId);
+  if (!part) return;
+  const connectors = (part.connectors || []).map(c => c.id);
+  const buses = (part.buses || []).map(b => b.members);
+  window.simRuntime.addPart(partState.id, partState.partId, connectors, buses);
+}
+
+function simNotifyPartRemoved(partId) {
+  if (!window.simRuntime?.ready) return;
+  window.simRuntime.removePart(partId);
+}
+
+function simNotifyWireAdded(wire) {
+  if (!window.simRuntime?.ready) return;
+  window.simRuntime.addWire(wire.id, wire.f, wire.fc, wire.t, wire.tc);
+}
+
+function simNotifyWireRemoved(wireId) {
+  if (!window.simRuntime?.ready) return;
+  window.simRuntime.removeWire(wireId);
+}
+
 // ===== INIT =====
 loadPartsDB();
+
+// Keyboard shortcut: Ctrl+Shift+S to toggle sim panel
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'S') {
+    e.preventDefault();
+    toggleSimPanel();
+  }
+  // Ctrl+Enter in sim editor to run
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && document.activeElement === document.getElementById('simEditor')) {
+    e.preventDefault();
+    simRunUserCode();
+  }
+});
+
+// Serial input Enter key
+document.getElementById('simSerialIn')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); simSendSerial(); }
+});
 </script>
+
+<!-- PyScript MicroPython: simulation bridge -->
+<mpy-config>
+[files]
+"py/animation.py" = "./animation.py"
+"py/simulation.py" = "./simulation.py"
+"py/url_state.py" = "./url_state.py"
+</mpy-config>
+<script type="mpy" src="py/board.py" async></script>
+
 </body>
 </html>
