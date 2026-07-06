@@ -21,7 +21,7 @@
 //   { type: 'conflict',     conflicts: [{ netId, driverA, driverB }, ...] }
 //   { type: 'error',        message }
 
-const WASM_BASE = './wasm/'
+const WASM_BASE = '../wasm/'
 
 // ---- State ----
 const ports = new Set()
